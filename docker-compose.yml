@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  polkadot-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: polkadot-dev-node
+    ports:
+      - "9944:9944"
+      - "9933:9933"
+      - "30333:30333"
+    volumes:
+      - ./data:/data
+      - ./config:/config
+    command: [
+      "--dev",
+      "--ws-external",
+      "--rpc-external", 
+      "--rpc-cors=all",
+      "--base-path=/data"
+    ]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -X POST -H 'Content-Type: application/json' -d '{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"system_health\",\"params\":[]}' http://localhost:9933 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - polkadot-network
+
+  polkadot-js-apps:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: polkadot-js-apps
+    ports:
+      - "3000:80"
+    depends_on:
+      polkadot-node:
+        condition: service_healthy
+    environment:
+      - WS_URL=ws://polkadot-node:9944
+      - REACT_APP_PROVIDER_URL=ws://polkadot-node:9944
+    networks:
+      - polkadot-network
+
+  block-explorer:
+    image: substrate/substrate-front-end-template:latest
+    container_name: polkadot-block-explorer
+    ports:
+      - "3001:80"
+    depends_on:
+      - polkadot-node
+    environment:
+      - REACT_APP_PROVIDER_URL=ws://polkadot-node:9944
+    networks:
+      - polkadot-network
+
+  asset-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile.asset-hub
+    container_name: polkadot-asset-hub
+    ports:
+      - "9945:9944"
+      - "9934:9933"
+    command: [
+      "--chain=rococo-local",
+      "--ws-external",
+      "--rpc-external",
+      "--rpc-cors=all",
+      "--base-path=/data/asset-hub"
+    ]
+    volumes:
+      - ./data/asset-hub:/data/asset-hub
+    depends_on:
+      polkadot-node:
+        condition: service_healthy
+    networks:
+      - polkadot-network
+
+  monitoring:
+    image: prom/prometheus:latest
+    container_name: polkadot-monitoring
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - polkadot-node
+    networks:
+      - polkadot-network
+
+networks:
+  polkadot-network:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+

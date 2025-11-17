@@ -1,0 +1,27 @@
+{
+  "name": "faucettest2",
+  "type": "gcp",
+  "nodes": 2,
+  "keep": true,
+  "monitoring": {
+    "enabled": true,
+    "opsgenie": {
+      "enabled": false,
+      "url": "https://api.eu.opsgenie.com/"
+     }
+  },
+  "image": {
+    "repo": "web3f/polkadot",
+    "tag": "kusama-v0.6.5-tx-enabled"
+  },
+  "remote": {
+    "projectID": "polkadot-benchmarks",
+    "domain": "w3f.tech",
+    "clusters": [
+      {
+        "provider": "gcp",
+        "location": "us-east1-b"
+      }
+    ]
+  }
+}

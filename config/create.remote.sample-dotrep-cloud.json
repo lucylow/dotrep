@@ -1,0 +1,137 @@
+{
+  "name": "dotrep-cloud-deployment",
+  "type": "gcp",
+  "nodes": 2,
+  "keep": true,
+  "monitoring": {
+    "enabled": true,
+    "opsgenie": {
+      "enabled": false,
+      "url": "https://api.eu.opsgenie.com/"
+    }
+  },
+  "resources": {
+    "requests": {
+      "memory": "2Gi",
+      "cpu": "1000m"
+    },
+    "limits": {
+      "memory": "4Gi",
+      "cpu": "2000m"
+    }
+  },
+  "remote": {
+    "projectID": "your-gcp-project-id",
+    "domain": "your-domain.com",
+    "clusters": [
+      {
+        "provider": "gcp",
+        "location": "us-central1-a",
+        "machineType": "n1-standard-4"
+      }
+    ]
+  },
+  "dotrep": {
+    "enabled": true,
+    "image": {
+      "repository": "gcr.io/your-project-id/dotrep-v2",
+      "tag": "latest"
+    },
+    "replicas": 3,
+    "ingress": {
+      "enabled": true,
+      "host": "dotrep.your-domain.com",
+      "tls": {
+        "enabled": true,
+        "certManager": {
+          "enabled": true,
+          "issuer": "letsencrypt-prod"
+        }
+      }
+    },
+    "env": {
+      "NODE_ENV": "production",
+      "PORT": "3000",
+      "ONFINALITY_API_KEY": "${ONFINALITY_API_KEY}",
+      "POLKADOT_WS_ENDPOINT": "${POLKADOT_WS_ENDPOINT}",
+      "POLKADOT_HTTP_ENDPOINT": "${POLKADOT_HTTP_ENDPOINT}",
+      "DATABASE_URL": "postgresql://user:pass@host:5432/dotrep",
+      "JWT_SECRET": "your-jwt-secret-here",
+      "CLOUDFLARE_API_KEY": "${CLOUDFLARE_API_KEY}",
+      "CLOUDFLARE_EMAIL": "${CLOUDFLARE_EMAIL}"
+    },
+    "polkadot": {
+      "enabled": true,
+      "chain": "polkadot",
+      "onfinalityApiKey": "${ONFINALITY_API_KEY}",
+      "wsEndpoints": [
+        "${POLKADOT_WS_ENDPOINT}",
+        "wss://rpc.polkadot.io"
+      ],
+      "httpEndpoints": [
+        "${POLKADOT_HTTP_ENDPOINT}"
+      ],
+      "xcm": {
+        "enabled": true,
+        "supportedChains": [
+          {
+            "id": "polkadot",
+            "name": "Polkadot Relay Chain",
+            "xcmConfig": {
+              "feeAsset": "DOT",
+              "weightLimit": 1000000000
+            }
+          },
+          {
+            "id": "kusama",
+            "name": "Kusama Relay Chain",
+            "xcmConfig": {
+              "feeAsset": "KSM",
+              "weightLimit": 1000000000
+            }
+          },
+          {
+            "id": "asset-hub",
+            "name": "Asset Hub",
+            "xcmConfig": {
+              "feeAsset": "DOT",
+              "weightLimit": 1000000000
+            }
+          }
+        ]
+      },
+      "governance": {
+        "enabled": true,
+        "votingPeriod": 10080,
+        "enactmentPeriod": 10080
+      }
+    },
+    "autoscaling": {
+      "enabled": true,
+      "minReplicas": 2,
+      "maxReplicas": 10,
+      "targetCPUUtilizationPercentage": 70,
+      "targetMemoryUtilizationPercentage": 80
+    },
+    "healthChecks": {
+      "liveness": {
+        "path": "/health",
+        "initialDelaySeconds": 30,
+        "periodSeconds": 10
+      },
+      "readiness": {
+        "path": "/ready",
+        "initialDelaySeconds": 10,
+        "periodSeconds": 5
+      }
+    },
+    "persistence": {
+      "enabled": true,
+      "storageClass": "standard",
+      "size": "20Gi",
+      "accessMode": "ReadWriteOnce"
+    }
+  }
+}
+
+

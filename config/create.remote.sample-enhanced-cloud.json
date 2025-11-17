@@ -1,0 +1,417 @@
+{
+  "name": "polkadot-enhanced-cloud",
+  "type": "gcp",
+  "nodes": 2,
+  "keep": false,
+  "monitoring": {
+    "enabled": true,
+    "opsgenie": {
+      "enabled": false,
+      "url": "https://api.eu.opsgenie.com/"
+    },
+    "prometheus": {
+      "enabled": true,
+      "retention": "30d",
+      "scrapeInterval": "15s"
+    },
+    "grafana": {
+      "enabled": true,
+      "adminPassword": "${GRAFANA_PASSWORD}",
+      "dashboards": [
+        "polkadot-metrics",
+        "kubernetes-cluster",
+        "application-performance"
+      ]
+    },
+    "distributedTracing": {
+      "enabled": true,
+      "provider": "jaeger",
+      "samplingRate": 0.1
+    },
+    "logAggregation": {
+      "enabled": true,
+      "provider": "loki",
+      "retention": "7d"
+    },
+    "alerts": {
+      "enabled": true,
+      "channels": ["email", "slack"],
+      "rules": [
+        {
+          "name": "HighCPUUsage",
+          "condition": "cpu_usage > 80",
+          "duration": "5m",
+          "severity": "warning"
+        },
+        {
+          "name": "NodeDown",
+          "condition": "node_status == 'down'",
+          "duration": "1m",
+          "severity": "critical"
+        },
+        {
+          "name": "HighLatency",
+          "condition": "p95_latency > 1000",
+          "duration": "5m",
+          "severity": "warning"
+        }
+      ]
+    }
+  },
+  "resources": {
+    "requests": {
+      "memory": "2Gi",
+      "cpu": "1000m"
+    },
+    "limits": {
+      "memory": "4Gi",
+      "cpu": "2000m"
+    },
+    "spotInstances": {
+      "enabled": false,
+      "maxPrice": "0.10",
+      "interruptionPolicy": "terminate"
+    }
+  },
+  "autoscaling": {
+    "enabled": true,
+    "minReplicas": 2,
+    "maxReplicas": 10,
+    "targetCPUUtilizationPercentage": 70,
+    "targetMemoryUtilizationPercentage": 80,
+    "customMetrics": [
+      {
+        "name": "request_rate",
+        "type": "Pods",
+        "target": {
+          "averageValue": "100"
+        }
+      },
+      {
+        "name": "queue_length",
+        "type": "Pods",
+        "target": {
+          "averageValue": "50"
+        }
+      }
+    ],
+    "predictiveScaling": {
+      "enabled": true,
+      "lookbackWindow": "24h",
+      "predictionWindow": "1h"
+    },
+    "scalingPolicies": [
+      {
+        "type": "scaleUp",
+        "policies": [
+          {
+            "type": "Pods",
+            "value": 2,
+            "periodSeconds": 60
+          },
+          {
+            "type": "Percent",
+            "value": 50,
+            "periodSeconds": 60
+          }
+        ],
+        "selectPolicy": "Max"
+      },
+      {
+        "type": "scaleDown",
+        "policies": [
+          {
+            "type": "Pods",
+            "value": 1,
+            "periodSeconds": 300
+          },
+          {
+            "type": "Percent",
+            "value": 10,
+            "periodSeconds": 300
+          }
+        ],
+        "selectPolicy": "Min",
+        "stabilizationWindowSeconds": 300
+      }
+    ]
+  },
+  "multiRegion": {
+    "enabled": true,
+    "regions": [
+      {
+        "provider": "gcp",
+        "location": "us-central1-a",
+        "machineType": "n1-standard-4",
+        "weight": 50
+      },
+      {
+        "provider": "gcp",
+        "location": "europe-west1-b",
+        "machineType": "n1-standard-4",
+        "weight": 50
+      }
+    ],
+    "loadBalancing": {
+      "strategy": "geographic",
+      "healthChecks": {
+        "enabled": true,
+        "interval": "30s",
+        "timeout": "5s",
+        "failureThreshold": 3
+      },
+      "failover": {
+        "enabled": true,
+        "failoverDelay": "60s"
+      }
+    }
+  },
+  "remote": {
+    "projectID": "your-gcp-project-id",
+    "domain": "your-domain.com",
+    "clusters": [
+      {
+        "provider": "gcp",
+        "location": "us-central1-a",
+        "machineType": "n1-standard-4",
+        "nodeCount": 2,
+        "spotInstances": false
+      }
+    ]
+  },
+  "security": {
+    "podSecurityPolicy": {
+      "enabled": true,
+      "runAsNonRoot": true,
+      "readOnlyRootFilesystem": true,
+      "allowPrivilegeEscalation": false
+    },
+    "networkPolicies": {
+      "enabled": true,
+      "defaultDeny": true,
+      "allowedIngress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "name": "ingress-nginx"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 3000
+            }
+          ]
+        }
+      ]
+    },
+    "secretsManagement": {
+      "provider": "vault",
+      "enabled": true,
+      "autoRotate": true,
+      "rotationInterval": "90d"
+    },
+    "encryption": {
+      "atRest": true,
+      "inTransit": true,
+      "tlsVersion": "1.3"
+    }
+  },
+  "backup": {
+    "enabled": true,
+    "schedule": "0 2 * * *",
+    "retention": {
+      "daily": 7,
+      "weekly": 4,
+      "monthly": 12
+    },
+    "storage": {
+      "provider": "gcs",
+      "bucket": "polkadot-backups",
+      "encryption": true
+    },
+    "include": [
+      "database",
+      "configurations",
+      "secrets"
+    ]
+  },
+  "disasterRecovery": {
+    "enabled": true,
+    "rpo": "1h",
+    "rto": "4h",
+    "failover": {
+      "automated": true,
+      "healthCheckInterval": "30s",
+      "failoverThreshold": 3
+    },
+    "backupRegions": [
+      {
+        "provider": "gcp",
+        "location": "europe-west1",
+        "priority": 1
+      }
+    ]
+  },
+  "costOptimization": {
+    "enabled": true,
+    "spotInstances": {
+      "enabled": false,
+      "maxPrice": "0.10",
+      "fallbackToOnDemand": true
+    },
+    "rightSizing": {
+      "enabled": true,
+      "recommendationInterval": "24h",
+      "autoApply": false
+    },
+    "scheduling": {
+      "enabled": true,
+      "scaleDownDuringOffHours": true,
+      "offHours": {
+        "start": "22:00",
+        "end": "06:00",
+        "timezone": "UTC"
+      }
+    },
+    "budgetAlerts": {
+      "enabled": true,
+      "thresholds": [50, 75, 90, 100],
+      "notifications": ["email", "slack"]
+    }
+  },
+  "deployment": {
+    "strategy": "blueGreen",
+    "rollback": {
+      "enabled": true,
+      "automatic": true,
+      "healthCheckFailureThreshold": 3
+    },
+    "canary": {
+      "enabled": false,
+      "trafficSplit": 10,
+      "duration": "30m",
+      "successCriteria": {
+        "errorRate": "< 1%",
+        "latency": "< 500ms"
+      }
+    },
+    "blueGreen": {
+      "enabled": true,
+      "switchDelay": "5m",
+      "autoSwitch": true
+    }
+  },
+  "performance": {
+    "cdn": {
+      "enabled": true,
+      "provider": "cloudflare",
+      "cachePolicy": "aggressive",
+      "ttl": 3600
+    },
+    "database": {
+      "connectionPooling": {
+        "enabled": true,
+        "minConnections": 5,
+        "maxConnections": 20,
+        "idleTimeout": "10m"
+      },
+      "readReplicas": {
+        "enabled": true,
+        "count": 2
+      }
+    },
+    "caching": {
+      "enabled": true,
+      "provider": "redis",
+      "ttl": 3600,
+      "strategy": "write-through"
+    }
+  },
+  "dotrep": {
+    "enabled": true,
+    "image": {
+      "repository": "gcr.io/your-project-id/dotrep-v2",
+      "tag": "latest"
+    },
+    "replicas": 3,
+    "ingress": {
+      "enabled": true,
+      "host": "dotrep.your-domain.com",
+      "tls": {
+        "enabled": true,
+        "certManager": {
+          "enabled": true,
+          "issuer": "letsencrypt-prod"
+        }
+      }
+    },
+    "env": {
+      "NODE_ENV": "production",
+      "PORT": "3000",
+      "ONFINALITY_API_KEY": "${ONFINALITY_API_KEY}",
+      "POLKADOT_WS_ENDPOINT": "${POLKADOT_WS_ENDPOINT}",
+      "POLKADOT_HTTP_ENDPOINT": "${POLKADOT_HTTP_ENDPOINT}",
+      "DATABASE_URL": "postgresql://user:pass@host:5432/dotrep",
+      "JWT_SECRET": "your-jwt-secret-here",
+      "CLOUDFLARE_API_KEY": "${CLOUDFLARE_API_KEY}",
+      "CLOUDFLARE_EMAIL": "${CLOUDFLARE_EMAIL}"
+    },
+    "polkadot": {
+      "enabled": true,
+      "chain": "polkadot",
+      "onfinalityApiKey": "${ONFINALITY_API_KEY}",
+      "wsEndpoints": [
+        "${POLKADOT_WS_ENDPOINT}",
+        "wss://rpc.polkadot.io"
+      ],
+      "httpEndpoints": [
+        "${POLKADOT_HTTP_ENDPOINT}"
+      ],
+      "xcm": {
+        "enabled": true,
+        "supportedChains": [
+          {
+            "id": "polkadot",
+            "name": "Polkadot Relay Chain",
+            "xcmConfig": {
+              "feeAsset": "DOT",
+              "weightLimit": 1000000000
+            }
+          }
+        ]
+      }
+    },
+    "autoscaling": {
+      "enabled": true,
+      "minReplicas": 2,
+      "maxReplicas": 10,
+      "targetCPUUtilizationPercentage": 70,
+      "targetMemoryUtilizationPercentage": 80
+    },
+    "healthChecks": {
+      "liveness": {
+        "path": "/health",
+        "initialDelaySeconds": 30,
+        "periodSeconds": 10
+      },
+      "readiness": {
+        "path": "/ready",
+        "initialDelaySeconds": 10,
+        "periodSeconds": 5
+      }
+    },
+    "persistence": {
+      "enabled": true,
+      "storageClass": "standard",
+      "size": "20Gi",
+      "accessMode": "ReadWriteOnce"
+    }
+  }
+}
+
+

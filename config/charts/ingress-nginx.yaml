@@ -1,0 +1,8 @@
+controller:
+  publishService:
+    enabled: "true"
+  config:
+    use-http2: "false"
+    server-tokens: "false"
+  service:
+    externalTrafficPolicy: "Local"

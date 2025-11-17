@@ -1,0 +1,22 @@
+name = "dotrep-edge-worker"
+main = "edge/reputation-cache.js"
+compatibility_date = "2024-01-01"
+
+[env.production]
+name = "dotrep-edge-worker"
+routes = [
+  { pattern = "edge.dotrep.cloud/*", zone_name = "dotrep.cloud" }
+]
+
+[env.staging]
+name = "dotrep-edge-worker-staging"
+
+[[kv_namespaces]]
+binding = "EDGE_KV"
+id = "your-kv-namespace-id"
+preview_id = "your-preview-kv-namespace-id"
+
+[vars]
+CLOUD_API_ENDPOINT = "https://api.dotrep.cloud"
+
+

@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  dotrep-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dotrep/cloud-api:latest
+    environment:
+      - NODE_ENV=production
+      - ONFINALITY_API_KEY=${ONFINALITY_API_KEY}
+      - POLKADOT_WS_ENDPOINT=${POLKADOT_WS_ENDPOINT}
+      - POLKADOT_HTTP_ENDPOINT=${POLKADOT_HTTP_ENDPOINT}
+      - POLKADOT_WS_URL=${POLKADOT_WS_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://cloud-cache:6379
+      - CLOUD_STORAGE_KEY=${CLOUD_STORAGE_KEY}
+      - PINATA_JWT=${PINATA_JWT}
+      - CLOUD_API_KEY=${CLOUD_API_KEY}
+      - CLOUD_VERIFICATION_ENDPOINT=${CLOUD_VERIFICATION_ENDPOINT:-https://api.dotrep.cloud/verify}
+      - CLOUD_STORAGE_ENDPOINT=${CLOUD_STORAGE_ENDPOINT:-https://storage.dotrep.cloud}
+      - CLOUD_ANALYTICS_ENDPOINT=${CLOUD_ANALYTICS_ENDPOINT:-https://analytics.dotrep.cloud}
+    ports:
+      - "3001:3001"
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - cloud-cache
+      - cloud-db
+
+  cloud-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: dotrep/verification-worker:latest
+    environment:
+      - REDIS_URL=redis://cloud-cache:6379
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - CLOUD_API_ENDPOINT=http://dotrep-api:3001
+      - CLOUD_API_KEY=${CLOUD_API_KEY}
+    deploy:
+      replicas: 5
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    depends_on:
+      - cloud-cache
+      - dotrep-api
+
+  cloud-cache:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cloud-db:
+    image: mysql:8
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-dotrep}
+      - MYSQL_USER=${MYSQL_USER:-dotrep}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    volumes:
+      - mongo_data:/var/lib/mysql
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cloud-monitoring:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=redis-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - cloud-db
+      - cloud-cache
+
+  anomaly-service:
+    build:
+      context: ./services/anomaly_service
+      dockerfile: Dockerfile
+    image: dotrep/anomaly-service:latest
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_HOST=cloud-db
+      - DB_PORT=3306
+      - MYSQL_USER=${MYSQL_USER:-dotrep}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-dotrep}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - cloud-db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/anomaly/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+  mongo_data:
+  grafana_data:
+

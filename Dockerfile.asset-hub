@@ -1,0 +1,42 @@
+# Asset Hub node (can reuse the same build process)
+FROM rust:1.75-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    clang \
+    cmake \
+    build-essential \
+    protobuf-compiler \
+    libssl-dev \
+    pkg-config \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build Asset Hub from Polkadot SDK
+WORKDIR /build
+RUN git clone --depth 1 https://github.com/paritytech/polkadot-sdk.git
+
+WORKDIR /build/polkadot-sdk
+RUN cargo build --release -p polkadot-parachain
+
+# Runtime stage
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the built binary
+COPY --from=builder /build/polkadot-sdk/target/release/polkadot-parachain /usr/local/bin/polkadot-parachain
+
+# Create data directory
+RUN mkdir -p /data/asset-hub
+
+EXPOSE 9944 9933 30333
+
+CMD ["polkadot-parachain", "--dev", "--ws-external", "--rpc-external", "--rpc-cors=all"]
+
+

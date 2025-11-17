@@ -1,0 +1,35 @@
+{
+  "name": "bm7",
+  "type": "gcp",
+  "benchmark": "finality",
+  "sets": [50, 100, 150, 200],
+  "blocks": {
+    "offset": 10,
+    "measure": 50
+  },
+  "reuseCluster": false,
+  "remote": {
+    "clusters": [
+      {
+        "location": "europe-west1-b",
+        "projectID": "polkadot-benchmarks",
+        "domain": "w3f.tech"
+      },
+      {
+        "location": "us-east1-b",
+        "projectID": "polkadot-benchmarks",
+        "domain": "w3f.tech"
+      },
+      {
+        "location": "us-west1-a",
+        "projectID": "polkadot-benchmarks",
+        "domain": "w3f.tech"
+      },
+      {
+        "location": "asia-northeast1-a",
+        "projectID": "polkadot-benchmarks",
+        "domain": "w3f.tech"
+      }
+    ]
+  }
+}

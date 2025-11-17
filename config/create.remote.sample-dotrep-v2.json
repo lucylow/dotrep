@@ -1,0 +1,52 @@
+{
+  "name": "dotrep-v2-testnet",
+  "type": "gcp",
+  "nodes": 1,
+  "keep": true,
+  "monitoring": {
+    "enabled": true,
+    "opsgenie": {
+      "enabled": false,
+      "url": "https://api.eu.opsgenie.com/"
+    }
+  },
+  "resources": {
+    "requests": {
+      "memory": "1Gi",
+      "cpu": "500m"
+    },
+    "limits": {
+      "memory": "2Gi",
+      "cpu": "1000m"
+    }
+  },
+  "remote": {
+    "projectID": "my-gcp-project-id",
+    "domain": "foo.bar",
+    "clusters": [
+      {
+        "provider": "gcp",
+        "location": "europe-west6-a",
+        "machineType": "n1-standard-2"
+      }
+    ]
+  },
+  "dotrep": {
+    "enabled": true,
+    "image": {
+      "repository": "dotrep-v2",
+      "tag": "latest"
+    },
+    "replicas": 1,
+    "ingress": {
+      "enabled": true,
+      "host": "dotrep.foo.bar"
+    },
+    "env": {
+      "NODE_ENV": "production",
+      "PORT": "3000"
+    }
+  }
+}
+
+

@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'polkadot-dev-stack'
+
+scrape_configs:
+  - job_name: 'polkadot-node'
+    static_configs:
+      - targets: ['polkadot-node:9933']
+        labels:
+          instance: 'polkadot-dev-node'
+          chain: 'development'
+
+  - job_name: 'asset-hub'
+    static_configs:
+      - targets: ['asset-hub:9934']
+        labels:
+          instance: 'polkadot-asset-hub'
+          chain: 'rococo-local'
+
+

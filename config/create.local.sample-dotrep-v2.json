@@ -1,0 +1,19 @@
+{
+  "name": "dotrep-v2-local",
+  "type": "local",
+  "nodes": 1,
+  "dotrep": {
+    "enabled": true,
+    "image": {
+      "repository": "dotrep-v2",
+      "tag": "latest"
+    },
+    "replicas": 1,
+    "env": {
+      "NODE_ENV": "development",
+      "PORT": "3000"
+    }
+  }
+}
+
+

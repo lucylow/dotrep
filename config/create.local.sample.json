@@ -1,0 +1,13 @@
+{
+  "name": "testnet5",
+  "type": "local",
+  "nodeRestart": {
+    "enabled": true,
+    "schedule": "50 * * * *"
+  },
+  "nodes": 1,
+  "image": {
+    "repo": "parity/polkadot",
+    "tag": "v0.8.30"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Development",
+  "id": "dev",
+  "chainType": "Development",
+  "bootNodes": [],
+  "telemetryEndpoints": null,
+  "protocolId": null,
+  "properties": {
+    "tokenDecimals": 12,
+    "tokenSymbol": "DOT"
+  },
+  "consensusEngine": null,
+  "codeSubstitutes": {}
+}
+
+

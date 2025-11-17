@@ -1,0 +1,52 @@
+# Multi-stage build for Polkadot node
+FROM rust:1.75-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    clang \
+    cmake \
+    build-essential \
+    protobuf-compiler \
+    libssl-dev \
+    pkg-config \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build Polkadot from source
+WORKDIR /build
+RUN git clone --depth 1 --branch release-v1.0.0 https://github.com/paritytech/polkadot-sdk.git || \
+    git clone --depth 1 https://github.com/paritytech/polkadot-sdk.git
+
+WORKDIR /build/polkadot-sdk
+RUN cargo build --release -p polkadot-node
+
+# Runtime stage
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the built binary
+COPY --from=builder /build/polkadot-sdk/target/release/polkadot /usr/local/bin/polkadot
+
+# Create data directory
+RUN mkdir -p /data
+
+# Expose ports
+# 9944 - WebSocket RPC
+# 9933 - HTTP RPC  
+# 30333 - P2P
+EXPOSE 9944 9933 30333
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:9933/health || exit 1
+
+# Default command
+CMD ["polkadot", "--dev", "--ws-external", "--rpc-external", "--rpc-cors=all"]
+
+

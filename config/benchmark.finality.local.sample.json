@@ -1,0 +1,12 @@
+{
+  "name": "bm1",
+  "type": "local",
+  "benchmark": "finality",
+  "startNodes": 2,
+  "endNodes": 3,
+  "blocks": {
+    "offset": 0,
+    "measure": 10
+  },
+  "reuseCluster": true
+}

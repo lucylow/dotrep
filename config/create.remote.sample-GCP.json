@@ -1,0 +1,30 @@
+{
+  "name": "gcp-testnet",
+  "type": "gcp",
+  "nodes": 2,
+  "keep": true,
+  "monitoring": {
+    "enabled": true,
+    "opsgenie": {
+      "enabled": false,
+      "url": "https://api.eu.opsgenie.com/"
+     }
+  },
+  "resources": {
+    "requests": {
+      "memory": "9Gi",
+      "cpu": "1.5"
+    }
+  },
+  "remote": {
+    "projectID": "my-gcp-project-id",
+    "domain": "foo.bar",
+    "clusters": [
+      {
+        "provider": "gcp",
+        "location": "europe-west6-a",
+        "machineType": "n1-standard-4"
+      }
+    ]
+  }
+}

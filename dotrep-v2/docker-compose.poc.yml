@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: dotrep_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ipfs:
+    image: ipfs/go-ipfs:latest
+    container_name: dotrep_ipfs
+    ports:
+      - "4001:4001"   # swarm
+      - "5001:5001"   # api
+      - "8080:8080"   # gateway
+    environment:
+      IPFS_PROFILE: "server"
+    volumes:
+      - ipfs_data:/data/ipfs
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5001/api/v0/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  app_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dotrep_api
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - IPFS_API_URL=http://ipfs:5001
+      - PROOFS_DIR=/usr/src/app/data/proofs
+      - PERSIST_PROOFS_TO_DISK=${PERSIST_PROOFS_TO_DISK:-false}
+    ports:
+      - "4000:4000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    command: sh -c "npm run dev"
+    volumes:
+      - ./:/usr/src/app
+      - ./data:/usr/src/app/data
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"] || true
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dotrep_worker
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - IPFS_API_URL=http://ipfs:5001
+      - PROOFS_DIR=/usr/src/app/data/proofs
+      - PERSIST_PROOFS_TO_DISK=${PERSIST_PROOFS_TO_DISK:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+      ipfs:
+        condition: service_healthy
+    command: sh -c "npm run dev:worker"
+    volumes:
+      - ./:/usr/src/app
+      - ./data:/usr/src/app/data
+    restart: on-failure
+
+volumes:
+  redis_data:
+  ipfs_data:
+
+

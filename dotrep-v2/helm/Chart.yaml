@@ -1,0 +1,15 @@
+apiVersion: v2
+name: dotrep-v2
+description: A Helm chart for DotRep v2 - Decentralized Reputation Protocol
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - dotrep
+  - polkadot
+  - reputation
+  - substrate
+maintainers:
+  - name: DotRep Team
+
+

@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+
+# Copy worker source
+COPY server/_core/cloudVerification.ts ./
+COPY server/_core/cloudStorage.ts ./
+COPY server/_core/reputationCalculator.ts ./
+
+# Create worker entry point
+RUN echo 'import { CloudVerificationService } from "./cloudVerification"; \
+const service = new CloudVerificationService(); \
+console.log("Cloud worker started");' > worker.js
+
+CMD ["node", "worker.js"]
+
+
