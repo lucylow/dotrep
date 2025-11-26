@@ -1,13 +1,11 @@
 import { cn } from "@/lib/utils";
-import { AlertTriangle, RotateCcw, Home, Bug } from "lucide-react";
+import { AlertTriangle, RotateCcw, Home } from "lucide-react";
 import { Component, ReactNode } from "react";
-import { Button } from "./ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Link } from "wouter";
+import { handleError } from "@/_core/errorHandler";
 
 interface Props {
   children: ReactNode;
-  fallback?: ReactNode;
+  fallback?: (error: Error, reset: () => void) => ReactNode;
   onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
 }
 
@@ -28,17 +26,20 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log error to console in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error('ErrorBoundary caught an error:', error, errorInfo);
+    // Log error
+    console.error("[ErrorBoundary] Caught error:", error, errorInfo);
+    
+    // Handle error
+    handleError(error, {
+      showToast: false, // Don't show toast for boundary errors
+    });
+
+    // Call custom error handler
+    if (this.props.onError) {
+      this.props.onError(error, errorInfo);
     }
 
-    // Call optional error handler
-    this.props.onError?.(error, errorInfo);
-
-    // In production, you might want to send this to an error reporting service
-    // Example: Sentry.captureException(error, { contexts: { react: errorInfo } });
-
+    // Store error info
     this.setState({ errorInfo });
   }
 
@@ -50,85 +51,81 @@ class ErrorBoundary extends Component<Props, State> {
     window.location.reload();
   };
 
+  handleGoHome = () => {
+    window.location.href = "/";
+  };
+
   render() {
-    if (this.state.hasError) {
+    if (this.state.hasError && this.state.error) {
+      // Use custom fallback if provided
       if (this.props.fallback) {
-        return this.props.fallback;
+        return this.props.fallback(this.state.error, this.handleReset);
       }
 
-      const isDevelopment = process.env.NODE_ENV === 'development';
-
+      // Default error UI
       return (
-        <div 
-          className="flex items-center justify-center min-h-screen p-4 sm:p-8 bg-background"
-          role="alert"
-          aria-live="assertive"
-        >
-          <Card className="w-full max-w-2xl">
-            <CardHeader className="text-center">
-              <div className="flex justify-center mb-4">
-                <div className="rounded-full bg-destructive/10 p-3">
-                  <AlertTriangle
-                    size={48}
-                    className="text-destructive"
-                    aria-hidden="true"
-                  />
-                </div>
-              </div>
-              <CardTitle className="text-2xl mb-2">
-                Something went wrong
-              </CardTitle>
-              <CardDescription>
-                An unexpected error occurred. Please try refreshing the page or return to the home page.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {isDevelopment && this.state.error && (
-                <div className="p-4 rounded-lg bg-muted overflow-auto max-h-64">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Bug className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm font-semibold text-muted-foreground">
-                      Error Details (Development Only)
-                    </span>
-                  </div>
-                  <pre className="text-xs text-muted-foreground whitespace-break-spaces font-mono">
-                    {this.state.error.toString()}
-                    {this.state.error.stack && `\n\n${this.state.error.stack}`}
-                  </pre>
-                </div>
-              )}
+        <div className="flex items-center justify-center min-h-screen p-8 bg-background">
+          <div className="flex flex-col items-center w-full max-w-2xl p-8 space-y-4">
+            <AlertTriangle
+              size={48}
+              className="text-destructive mb-2 flex-shrink-0"
+            />
 
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button
-                  onClick={this.handleReset}
-                  variant="outline"
-                  className="flex items-center gap-2"
-                  aria-label="Try again"
-                >
-                  <RotateCcw size={16} aria-hidden="true" />
-                  Try Again
-                </Button>
-                <Button
-                  onClick={this.handleReload}
-                  className="flex items-center gap-2"
-                  aria-label="Reload page"
-                >
-                  <RotateCcw size={16} aria-hidden="true" />
-                  Reload Page
-                </Button>
-                <Link href="/">
-                  <Button
-                    variant="ghost"
-                    className="flex items-center gap-2"
-                    aria-label="Go to home page"
-                  >
-                    <Home size={16} aria-hidden="true" />
-                    Go Home
-                  </Button>
-                </Link>
+            <h2 className="text-2xl font-semibold text-center">
+              Something went wrong
+            </h2>
+
+            <p className="text-muted-foreground text-center">
+              An unexpected error occurred. We're sorry for the inconvenience.
+            </p>
+
+            {process.env.NODE_ENV === "development" && this.state.error && (
+              <div className="p-4 w-full rounded bg-muted overflow-auto">
+                <pre className="text-sm text-muted-foreground whitespace-break-spaces">
+                  {this.state.error.message}
+                  {this.state.error.stack && `\n\n${this.state.error.stack}`}
+                </pre>
               </div>
-            </CardContent>
-          </Card>
+            )}
+
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={this.handleReset}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg",
+                  "bg-primary text-primary-foreground",
+                  "hover:opacity-90 cursor-pointer transition-opacity"
+                )}
+              >
+                <RotateCcw size={16} />
+                Try Again
+              </button>
+
+              <button
+                onClick={this.handleGoHome}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg",
+                  "bg-secondary text-secondary-foreground",
+                  "hover:opacity-90 cursor-pointer transition-opacity"
+                )}
+              >
+                <Home size={16} />
+                Go Home
+              </button>
+
+              <button
+                onClick={this.handleReload}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg",
+                  "bg-secondary text-secondary-foreground",
+                  "hover:opacity-90 cursor-pointer transition-opacity"
+                )}
+              >
+                <RotateCcw size={16} />
+                Reload Page
+              </button>
+            </div>
+          </div>
         </div>
       );
     }

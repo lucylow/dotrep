@@ -62,7 +62,7 @@ export default function LandingPageLovable() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="text-5xl md:text-7xl font-extrabold mb-6 leading-tight text-[#131313] text-balance"
+            className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold mb-6 leading-tight text-[#131313] text-balance px-2"
           >
             Decentralized Reputation.
             <br />
@@ -76,7 +76,7 @@ export default function LandingPageLovable() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-xl text-[#4F4F4F] max-w-3xl mx-auto mb-8 leading-relaxed"
+            className="text-base sm:text-lg md:text-xl text-[#4F4F4F] max-w-3xl mx-auto mb-8 leading-relaxed px-4"
           >
             DotRep anchors developer contributions into Polkadot Cloud DA, verifies them off-chain,
             and finalizes trust on-chain through a custom Substrate pallet.
