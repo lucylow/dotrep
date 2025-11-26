@@ -1,0 +1,41 @@
+{
+  "name": "@dotrep/dkg-integration",
+  "version": "1.0.0",
+  "description": "OriginTrail DKG integration for DotRep reputation system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.ts\""
+  },
+  "keywords": [
+    "origintrail",
+    "dkg",
+    "polkadot",
+    "reputation",
+    "knowledge-graph",
+    "blockchain"
+  ],
+  "author": "DotRep Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "dkg.js": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "prettier": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
