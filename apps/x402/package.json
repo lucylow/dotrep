@@ -1,0 +1,14 @@
+{
+  "name": "x402-gateway",
+  "version": "1.0.0",
+  "description": "x402 Micropayment Gateway for DOTREP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "axios": "^1.12.0"
+  }
+}
+

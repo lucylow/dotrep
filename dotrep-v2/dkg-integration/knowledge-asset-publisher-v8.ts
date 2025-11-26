@@ -64,13 +64,16 @@ export class KnowledgeAssetPublisherV8 {
     // Check if we already have a UAL for this developer
     const existingUAL = this.ualCache.get(reputationData.developer.id);
     
+    // If updating, link to previous version for provenance
+    const previousVersionUAL = existingUAL && !forceUpdate ? undefined : existingUAL;
+
     if (existingUAL && !forceUpdate) {
       console.log(`✅ Using cached UAL for developer ${reputationData.developer.id}`);
       return { UAL: existingUAL };
     }
 
-    // Convert to ReputationAsset format
-    const asset = this.convertToReputationAsset(reputationData, includePII);
+    // Convert to ReputationAsset format (includes provenance and versioning)
+    const asset = this.convertToReputationAsset(reputationData, includePII, previousVersionUAL);
 
     console.log(`📤 Publishing reputation for ${reputationData.developer.id}`);
     console.log(`   Score: ${asset.reputationScore}, Contributions: ${asset.contributions.length}`);
@@ -210,13 +213,20 @@ export class KnowledgeAssetPublisherV8 {
    */
   private convertToReputationAsset(
     data: ReputationData,
-    includePII: boolean
+    includePII: boolean,
+    previousVersionUAL?: string
   ): ReputationAsset {
     return {
       developerId: data.developer.address,
       reputationScore: data.score,
       contributions: this.convertContributions(data.contributions),
       timestamp: data.lastUpdated.getTime(),
+      previousVersionUAL,
+      provenance: {
+        computedBy: 'urn:agent:dotrep-repute-v1',
+        method: 'weightedPageRank+stake+sybilHeuristics',
+        sourceAssets: [] // Could be populated with contribution UALs
+      },
       metadata: {
         username: includePII ? data.developer.username : undefined,
         githubId: data.developer.githubId,

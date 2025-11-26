@@ -29,8 +29,51 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use sp_std::vec::Vec;
+    use codec::{Encode, Decode};
+    use scale_info::TypeInfo;
 
     type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
+    /// Claim status
+    #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, TypeInfo, MaxEncodedLen)]
+    pub enum ClaimStatus {
+        Pending,
+        Challenged,
+        Resolved,
+    }
+
+    /// Claim resolution
+    #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, TypeInfo, MaxEncodedLen)]
+    pub enum ClaimResolution {
+        Accepted,
+        Rejected,
+        Uncertain,
+    }
+
+    /// Claim data structure
+    #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, TypeInfo, MaxEncodedLen)]
+    pub struct Claim<T: Config> {
+        pub id: u64,
+        pub submitter: T::AccountId,
+        pub claim_ual: Vec<u8>,
+        pub evidence_uals: Vec<Vec<u8>>,
+        pub stake: BalanceOf<T>,
+        pub status: ClaimStatus,
+        pub created_at: T::BlockNumber,
+        pub challenge_deadline: T::BlockNumber,
+        pub challenger: Option<T::AccountId>,
+        pub resolution: Option<ClaimResolution>,
+    }
+
+    /// Challenge data structure
+    #[derive(Clone, Encode, Decode, Eq, PartialEq, Debug, TypeInfo, MaxEncodedLen)]
+    pub struct Challenge<T: Config> {
+        pub claim_id: u64,
+        pub challenger: T::AccountId,
+        pub counter_evidence_uals: Vec<Vec<u8>>,
+        pub stake: BalanceOf<T>,
+        pub challenged_at: T::BlockNumber,
+    }
 
     #[pallet::config]
     pub trait Config: frame_system::Config {
@@ -104,6 +147,41 @@ pub mod pallet {
     #[pallet::getter(fn treasury_account)]
     pub type TreasuryAccount<T: Config> = StorageValue<_, T::AccountId, OptionQuery>;
 
+    /// Claim ID counter
+    #[pallet::storage]
+    pub type ClaimIdCounter<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// Storage for claims
+    #[pallet::storage]
+    #[pallet::getter(fn claim)]
+    pub type Claims<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        Claim<T>,
+        OptionQuery,
+    >;
+
+    /// Storage for challenges
+    #[pallet::storage]
+    pub type ClaimChallenges<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        Challenge<T>,
+        OptionQuery,
+    >;
+
+    /// Storage for submitter's claims
+    #[pallet::storage]
+    pub type SubmitterClaims<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        T::AccountId,
+        Vec<u64>,
+        ValueQuery,
+    >;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -127,6 +205,15 @@ pub mod pallet {
         
         /// Custom query price set [ual, price]
         CustomPriceSet { ual: Vec<u8>, price: BalanceOf<T> },
+
+        /// Claim posted [claim_id, submitter, stake]
+        ClaimPosted { claim_id: u64, submitter: T::AccountId, stake: BalanceOf<T> },
+
+        /// Claim challenged [claim_id, challenger, stake]
+        ClaimChallenged { claim_id: u64, challenger: T::AccountId, stake: BalanceOf<T> },
+
+        /// Claim resolved [claim_id, resolution]
+        ClaimResolved { claim_id: u64, resolution: ClaimResolution },
     }
 
     #[pallet::error]
@@ -157,6 +244,24 @@ pub mod pallet {
         
         /// Treasury account not set
         TreasuryNotSet,
+
+        /// Claim not found
+        ClaimNotFound,
+
+        /// Challenge window has expired
+        ChallengeWindowExpired,
+
+        /// Claim is not in a challengeable state
+        ClaimNotChallengeable,
+
+        /// Cannot challenge own claim
+        CannotChallengeOwnClaim,
+
+        /// Insufficient stake for challenge
+        InsufficientStake,
+
+        /// Claim is not in a resolvable state
+        ClaimNotResolvable,
     }
 
     #[pallet::call]
@@ -339,19 +444,215 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Set treasury account (governance only)
-        #[pallet::call_index(6)]
-        #[pallet::weight(10_000)]
-        pub fn set_treasury(
-            origin: OriginFor<T>,
-            treasury: T::AccountId,
-        ) -> DispatchResult {
-            ensure_root(origin)?;
+    /// Set treasury account (governance only)
+    #[pallet::call_index(6)]
+    #[pallet::weight(10_000)]
+    pub fn set_treasury(
+        origin: OriginFor<T>,
+        treasury: T::AccountId,
+    ) -> DispatchResult {
+        ensure_root(origin)?;
 
-            TreasuryAccount::<T>::put(treasury);
+        TreasuryAccount::<T>::put(treasury);
 
-            Ok(())
+        Ok(())
+    }
+
+    /// Post a verifiable claim anchored to Knowledge Assets (Claim Verification)
+    /// Uses optimistic posting with challenge window
+    #[pallet::call_index(7)]
+    #[pallet::weight(20_000)]
+    pub fn post_claim(
+        origin: OriginFor<T>,
+        claim_ual: Vec<u8>,
+        evidence_uals: Vec<Vec<u8>>,
+        stake: BalanceOf<T>,
+    ) -> DispatchResult {
+        let who = ensure_signed(origin)?;
+
+        // Require minimum stake
+        ensure!(stake >= T::MinimumStake::get(), Error::<T>::BelowMinimumStake);
+
+        // Reserve stake
+        T::Currency::reserve(&who, stake)
+            .map_err(|_| Error::<T>::InsufficientBalance)?;
+
+        let claim_id = Self::get_next_claim_id();
+        let current_block = <frame_system::Pallet<T>>::block_number();
+        let challenge_window = BlockNumberFor::<T>::from(1000u32); // 1000 blocks
+        let expiry = current_block.saturating_add(challenge_window);
+
+        // Store claim
+        Claims::<T>::insert(
+            claim_id,
+            Claim {
+                id: claim_id,
+                submitter: who.clone(),
+                claim_ual,
+                evidence_uals: evidence_uals.clone(),
+                stake,
+                status: ClaimStatus::Pending,
+                created_at: current_block,
+                challenge_deadline: expiry,
+                challenger: None,
+                resolution: None,
+            },
+        );
+
+        // Store submitter's claim IDs
+        SubmitterClaims::<T>::mutate(&who, |claims| {
+            claims.push(claim_id);
+        });
+
+        Self::deposit_event(Event::ClaimPosted {
+            claim_id,
+            submitter: who,
+            stake,
+        });
+
+        Ok(())
+    }
+
+    /// Challenge a claim with counter-evidence
+    #[pallet::call_index(8)]
+    #[pallet::weight(20_000)]
+    pub fn challenge_claim(
+        origin: OriginFor<T>,
+        claim_id: u64,
+        counter_evidence_uals: Vec<Vec<u8>>,
+        stake: BalanceOf<T>,
+    ) -> DispatchResult {
+        let challenger = ensure_signed(origin)?;
+
+        let mut claim = Claims::<T>::get(claim_id)
+            .ok_or(Error::<T>::ClaimNotFound)?;
+
+        // Check challenge window hasn't expired
+        let current_block = <frame_system::Pallet<T>>::block_number();
+        ensure!(
+            current_block <= claim.challenge_deadline,
+            Error::<T>::ChallengeWindowExpired
+        );
+
+        // Check claim is still pending
+        ensure!(
+            claim.status == ClaimStatus::Pending,
+            Error::<T>::ClaimNotChallengeable
+        );
+
+        // Cannot challenge own claim
+        ensure!(challenger != claim.submitter, Error::<T>::CannotChallengeOwnClaim);
+
+        // Require stake (at least matching original stake)
+        ensure!(stake >= claim.stake, Error::<T>::InsufficientStake);
+
+        // Reserve challenger's stake
+        T::Currency::reserve(&challenger, stake)
+            .map_err(|_| Error::<T>::InsufficientBalance)?;
+
+        // Update claim
+        claim.status = ClaimStatus::Challenged;
+        claim.challenger = Some(challenger.clone());
+        
+        // Store counter-evidence
+        ClaimChallenges::<T>::insert(
+            claim_id,
+            Challenge {
+                claim_id,
+                challenger: challenger.clone(),
+                counter_evidence_uals,
+                stake,
+                challenged_at: current_block,
+            },
+        );
+
+        Claims::<T>::insert(claim_id, claim);
+
+        Self::deposit_event(Event::ClaimChallenged {
+            claim_id,
+            challenger,
+            stake,
+        });
+
+        Ok(())
+    }
+
+    /// Resolve a challenged claim (oracle/governance)
+    #[pallet::call_index(9)]
+    #[pallet::weight(30_000)]
+    pub fn resolve_claim(
+        origin: OriginFor<T>,
+        claim_id: u64,
+        resolution: ClaimResolution,
+    ) -> DispatchResult {
+        // Only root or oracle account can resolve
+        ensure_root(origin)?;
+
+        let mut claim = Claims::<T>::get(claim_id)
+            .ok_or(Error::<T>::ClaimNotFound)?;
+
+        ensure!(
+            claim.status == ClaimStatus::Challenged,
+            Error::<T>::ClaimNotResolvable
+        );
+
+        claim.status = ClaimStatus::Resolved;
+        claim.resolution = Some(resolution.clone());
+
+        // Distribute stakes based on resolution
+        match resolution {
+            ClaimResolution::Accepted => {
+                // Return stake to submitter, slash challenger
+                T::Currency::unreserve(&claim.submitter, claim.stake);
+                if let Some(ref challenger) = claim.challenger {
+                    let challenge = ClaimChallenges::<T>::get(claim_id).unwrap();
+                    T::Currency::slash_reserved(challenger, challenge.stake);
+                    // Transfer slashed amount to treasury
+                    if let Some(treasury) = TreasuryAccount::<T>::get() {
+                        T::Currency::transfer(
+                            challenger,
+                            &treasury,
+                            challenge.stake,
+                            ExistenceRequirement::KeepAlive,
+                        )?;
+                    }
+                }
+            }
+            ClaimResolution::Rejected => {
+                // Slash submitter, return stake to challenger
+                T::Currency::slash_reserved(&claim.submitter, claim.stake);
+                if let Some(ref treasury) = TreasuryAccount::<T>::get() {
+                    T::Currency::transfer(
+                        &claim.submitter,
+                        treasury,
+                        claim.stake,
+                        ExistenceRequirement::KeepAlive,
+                    )?;
+                }
+                if let Some(ref challenger) = claim.challenger {
+                    let challenge = ClaimChallenges::<T>::get(claim_id).unwrap();
+                    T::Currency::unreserve(challenger, challenge.stake);
+                }
+            }
+            ClaimResolution::Uncertain => {
+                // Return stakes to both parties
+                T::Currency::unreserve(&claim.submitter, claim.stake);
+                if let Some(ref challenger) = claim.challenger {
+                    let challenge = ClaimChallenges::<T>::get(claim_id).unwrap();
+                    T::Currency::unreserve(challenger, challenge.stake);
+                }
+            }
         }
+
+        Claims::<T>::insert(claim_id, claim);
+
+        Self::deposit_event(Event::ClaimResolved {
+            claim_id,
+            resolution,
+        });
+
+        Ok(())
+    }
     }
 
     impl<T: Config> Pallet<T> {
@@ -377,6 +678,14 @@ pub mod pallet {
             } else {
                 0
             }
+        }
+
+        /// Get next claim ID
+        fn get_next_claim_id() -> u64 {
+            ClaimIdCounter::<T>::mutate(|counter| {
+                *counter = counter.saturating_add(1);
+                *counter
+            })
         }
     }
 }

@@ -1,0 +1,19 @@
+{
+  "@context": ["https://schema.org/"],
+  "type": "AccessReceipt",
+  "id": "urn:ual:dotrep:receipt:{{txHash}}",
+  "payer": "did:key:{{payerDid}}",
+  "recipient": "did:key:{{recipientDid}}",
+  "amount": "{{amount}}",
+  "token": "{{token}}",
+  "resourceUAL": "{{resourceUAL}}",
+  "paymentTx": "{{txHash}}",
+  "published": "{{publishedAt}}",
+  "contentHash": "{{contentHash}}",
+  "signature": "{{signature}}",
+  "schema:paymentMethod": {
+    "type": "x402",
+    "protocol": "HTTP/1.1 402 Payment Required"
+  }
+}
+

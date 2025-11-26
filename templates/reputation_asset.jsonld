@@ -1,0 +1,32 @@
+{
+  "@context": [
+    "https://schema.org/",
+    {
+      "dkg": "https://origintrail.io/dkg-schema/",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "type": "ReputationAsset",
+  "id": "urn:ual:dotrep:reputation:{{creatorId}}:{{timestamp}}",
+  "creator": "did:key:{{publisherDid}}",
+  "published": "{{publishedAt}}",
+  "contentHash": "{{contentHash}}",
+  "signature": "{{signature}}",
+  "reputationScore": {{reputationScore}},
+  "components": {
+    "graphScore": {{graphScore}},
+    "stakeWeight": {{stakeWeight}},
+    "sybilPenalty": {{sybilPenalty}}
+  },
+  "provenance": {
+    "computedBy": "urn:agent:dotrep-repute-v1",
+    "method": "weightedPageRank+stake",
+    "alpha": {{alpha}},
+    "timestamp": "{{computedAt}}"
+  },
+  "schema:about": {
+    "@id": "urn:ual:creator:example:{{creatorId}}",
+    "schema:identifier": "{{creatorId}}"
+  }
+}
+

@@ -12,12 +12,24 @@
  */
 
 import DKG from 'dkg.js';
+import {
+  MOCK_REPUTATION_ASSETS,
+  getMockJSONLD,
+  getMockUAL,
+  generateMockUAL,
+  searchMockReputations,
+  getMockNodeInfo,
+  hasMockData,
+  findDeveloperByUAL,
+} from './mock-data';
 
 export interface DKGConfig {
   endpoint?: string;
   blockchain?: string;
   wallet?: string;
   environment?: 'testnet' | 'mainnet' | 'local';
+  useMockMode?: boolean; // Enable mock mode to use mock data instead of real DKG
+  fallbackToMock?: boolean; // Automatically fallback to mock mode if DKG is unavailable
 }
 
 export interface ReputationAsset {
@@ -49,10 +61,17 @@ export interface PublishResult {
 export class DKGClient {
   private dkg: any;
   private config: DKGConfig;
+  private useMockMode: boolean = false;
 
   constructor(config?: DKGConfig) {
     this.config = this.resolveConfig(config);
-    this.initializeDKG();
+    this.useMockMode = config?.useMockMode || process.env.DKG_USE_MOCK === 'true' || false;
+    
+    if (this.useMockMode) {
+      console.log('🔧 DKG Client running in MOCK MODE - using mock data');
+    } else {
+      this.initializeDKG();
+    }
   }
 
   /**
@@ -92,9 +111,16 @@ export class DKGClient {
         ...(this.config.wallet && { wallet: this.config.wallet })
       });
       console.log(`DKG Client initialized for ${this.config.environment} environment`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to initialize DKG client:', error);
-      throw new Error(`DKG initialization failed: ${error.message}`);
+      
+      // If fallback to mock is enabled, use mock mode instead of throwing
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  Falling back to MOCK MODE due to initialization failure');
+        this.useMockMode = true;
+      } else {
+        throw new Error(`DKG initialization failed: ${error.message}`);
+      }
     }
   }
 
@@ -109,6 +135,18 @@ export class DKGClient {
     reputationData: ReputationAsset,
     epochs: number = 2
   ): Promise<PublishResult> {
+    // Use mock mode if enabled
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Publishing reputation asset for developer: ${reputationData.developerId}`);
+      const ual = generateMockUAL(reputationData.developerId);
+      console.log(`✅ [MOCK] Reputation asset published: ${ual}`);
+      return {
+        UAL: ual,
+        transactionHash: `0x${Buffer.from(`${Date.now()}-${Math.random()}`).toString('hex')}`,
+        blockNumber: Math.floor(Date.now() / 1000),
+      };
+    }
+
     try {
       // Convert reputation data to JSON-LD format
       const knowledgeAsset = this.toJSONLD(reputationData);
@@ -126,8 +164,16 @@ export class DKGClient {
         transactionHash: result.transactionHash,
         blockNumber: result.blockNumber
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to publish reputation asset:', error);
+      
+      // Fallback to mock if enabled
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  DKG operation failed, falling back to mock mode');
+        this.useMockMode = true;
+        return this.publishReputationAsset(reputationData, epochs);
+      }
+      
       throw new Error(`Asset publishing failed: ${error.message}`);
     }
   }
@@ -139,11 +185,53 @@ export class DKGClient {
    * @returns Reputation data from the DKG
    */
   async queryReputation(ual: string): Promise<any> {
+    // Use mock mode if enabled
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Querying reputation asset: ${ual}`);
+      const developerId = findDeveloperByUAL(ual);
+      if (developerId) {
+        const mockData = getMockJSONLD(developerId);
+        if (mockData) {
+          console.log(`✅ [MOCK] Reputation asset retrieved`);
+          return mockData;
+        }
+      }
+      
+      // Return generic mock response
+      return {
+        '@context': {
+          '@vocab': 'https://schema.org/',
+          'dotrep': 'https://dotrep.io/ontology/',
+        },
+        '@type': 'Person',
+        '@id': ual,
+        'identifier': 'mock-developer',
+        'dateModified': new Date().toISOString(),
+        'dotrep:reputationScore': 750,
+        'aggregateRating': {
+          '@type': 'AggregateRating',
+          'ratingValue': 750,
+          'bestRating': 1000,
+          'worstRating': 0,
+        },
+        'dotrep:contributions': [],
+        'mock': true,
+      };
+    }
+
     try {
       const asset = await this.dkg.asset.get(ual);
       return asset.public;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Failed to query reputation asset ${ual}:`, error);
+      
+      // Fallback to mock if enabled
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  DKG operation failed, falling back to mock mode');
+        this.useMockMode = true;
+        return this.queryReputation(ual);
+      }
+      
       throw new Error(`Asset query failed: ${error.message}`);
     }
   }
@@ -155,6 +243,25 @@ export class DKGClient {
    * @returns Array of matching reputation assets
    */
   async searchByDeveloper(developerId: string): Promise<any[]> {
+    // Use mock mode if enabled
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Searching for developer: ${developerId}`);
+      if (hasMockData(developerId)) {
+        const mockUAL = getMockUAL(developerId) || generateMockUAL(developerId);
+        const asset = MOCK_REPUTATION_ASSETS.get(developerId);
+        if (asset) {
+          console.log(`✅ [MOCK] Found 1 reputation asset`);
+          return [{
+            asset: mockUAL,
+            reputation: asset.reputationScore,
+            timestamp: asset.timestamp,
+          }];
+        }
+      }
+      console.log(`✅ [MOCK] Found 0 reputation assets`);
+      return [];
+    }
+
     try {
       // Use SPARQL query to search for developer's reputation assets
       const query = `
@@ -173,8 +280,16 @@ export class DKGClient {
 
       const results = await this.dkg.graph.query(query, 'SELECT');
       return results;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Failed to search for developer ${developerId}:`, error);
+      
+      // Fallback to mock if enabled
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  DKG operation failed, falling back to mock mode');
+        this.useMockMode = true;
+        return this.searchByDeveloper(developerId);
+      }
+      
       throw new Error(`Search failed: ${error.message}`);
     }
   }
@@ -268,10 +383,24 @@ export class DKGClient {
    * Get DKG node information
    */
   async getNodeInfo(): Promise<any> {
+    // Use mock mode if enabled
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Getting node info`);
+      return getMockNodeInfo();
+    }
+
     try {
       return await this.dkg.node.info();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to get node info:', error);
+      
+      // Fallback to mock if enabled
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  DKG operation failed, falling back to mock mode');
+        this.useMockMode = true;
+        return this.getNodeInfo();
+      }
+      
       throw new Error(`Node info query failed: ${error.message}`);
     }
   }
@@ -280,11 +409,51 @@ export class DKGClient {
    * Check if DKG connection is healthy
    */
   async healthCheck(): Promise<boolean> {
+    // In mock mode, always return true
+    if (this.useMockMode) {
+      console.log(`✅ [MOCK] DKG connection is healthy (mock mode)`);
+      return true;
+    }
+
     try {
       await this.getNodeInfo();
       return true;
     } catch (error) {
+      // If fallback is enabled, switch to mock mode
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  Switching to mock mode due to health check failure');
+        this.useMockMode = true;
+        return true;
+      }
       return false;
+    }
+  }
+
+  /**
+   * Get connection status
+   */
+  getStatus(): { mockMode: boolean; environment: string; endpoint: string } {
+    return {
+      mockMode: this.useMockMode,
+      environment: this.config.environment || 'unknown',
+      endpoint: this.config.endpoint || 'unknown',
+    };
+  }
+
+  /**
+   * Execute a SPARQL query on the DKG graph
+   * 
+   * @param query - SPARQL query string
+   * @param queryType - Query type ('SELECT', 'ASK', 'CONSTRUCT', 'DESCRIBE')
+   * @returns Query results
+   */
+  async graphQuery(query: string, queryType: string = 'SELECT'): Promise<any[]> {
+    try {
+      const results = await this.dkg.graph.query(query, queryType);
+      return results;
+    } catch (error) {
+      console.error('Failed to execute graph query:', error);
+      throw new Error(`Graph query failed: ${error.message}`);
     }
   }
 }

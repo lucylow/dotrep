@@ -82,13 +82,15 @@ Data Sources (CSV/JSON/APIs)
 
 ### Component Brief
 
-- **`services/ingest`** — JSON-LD generator scripts & publisher CLI.
-- **`services/reputation`** — compute engine, unit tests, and publish helper.
-- **`apps/mcp-server`** — exposes REST MCP tools used by agents/LLMs.
-- **`apps/x402`** — simulated x402 gateway (HTTP 402 flow + receipt publishing).
-- **`apps/ui`** — React app: leaderboards, graph viz, marketplace.
-- **`services/mock-dkg`** — optional local DKG simulator (for offline demos).
-- **`scripts/verify_asset.py`** — CLI to validate contentHash, signature, and optional on-chain anchor.
+- **`services/ingest`** — Python JSON-LD generator scripts & publisher CLI.
+- **`services/reputation`** — Python compute engine, unit tests, and publish helper.
+- **`apps/mcp-server`** — MCP server exposing tools for AI agents (uses existing dotrep-v2/mcp-server).
+- **`apps/x402`** — Node.js x402 gateway (HTTP 402 flow + receipt publishing).
+- **`apps/ui`** — React app: leaderboards, graph viz, marketplace (uses existing dotrep-v2/client).
+- **`services/mock-dkg`** — Express.js mock DKG Edge Node (for offline demos).
+- **`scripts/verify_asset.py`** — Python CLI to validate contentHash, signature, and optional on-chain anchor.
+- **`templates/`** — JSON-LD templates for ReputationAsset, ReceiptAsset, CommunityNote.
+- **`deploy/docker-compose.yml`** — Complete Docker Compose setup for all services.
 
 ### Architecture Diagram
 
@@ -292,6 +294,23 @@ sequenceDiagram
 ```
 
 ---
+
+## 🚀 Quick Start (Docker Compose - Recommended)
+
+For the easiest deployment, use Docker Compose:
+
+```bash
+cd deploy
+docker-compose up --build
+```
+
+This starts all services:
+- Mock DKG: http://localhost:8085
+- MCP Server: http://localhost:3001
+- x402 Gateway: http://localhost:4001
+- UI: http://localhost:3000
+
+See `README_DEPLOYMENT.md` for detailed deployment instructions.
 
 ## Quick Start (Run Locally, 5–10 min)
 

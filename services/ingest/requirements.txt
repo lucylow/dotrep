@@ -1,0 +1,4 @@
+requests>=2.31.0
+canonicaljson>=1.6.5
+cryptography>=42.0.0
+

@@ -1,0 +1,24 @@
+{
+  "@context": [
+    "https://schema.org/",
+    {
+      "dkg": "https://origintrail.io/dkg-schema/",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "type": "CommunityNote",
+  "id": "urn:ual:dotrep:note:{{noteId}}",
+  "author": "did:key:{{authorDid}}",
+  "published": "{{publishedAt}}",
+  "contentHash": "{{contentHash}}",
+  "signature": "{{signature}}",
+  "targetUAL": "{{targetUAL}}",
+  "noteType": "{{noteType}}",
+  "content": "{{content}}",
+  "evidenceUALs": {{evidenceUALs}},
+  "authorReputation": {{authorReputation}},
+  "schema:about": {
+    "@id": "{{targetUAL}}"
+  }
+}
+
