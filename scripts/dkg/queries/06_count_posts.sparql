@@ -1,0 +1,10 @@
+# Query: Count distinct posts (SocialMediaPosting)
+# Purpose: Quick scan to determine content volume
+
+PREFIX schema: <https://schema.org/>
+
+SELECT (COUNT(DISTINCT ?post) AS ?postCount)
+WHERE {
+  ?post a schema:SocialMediaPosting .
+}
+

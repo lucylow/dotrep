@@ -22,6 +22,8 @@ import { DKGClient } from '../dkg-integration/dkg-client';
 import { KnowledgeAssetPublisher } from '../dkg-integration/knowledge-asset-publisher';
 import { createAIAgents } from '../server/_core/aiAgents';
 import { getPolkadotApi } from '../server/_core/polkadotApi';
+import { ConversationalCampaignBuilder, NLQueryProcessor } from '../server/_core/conversationalAgent';
+import { createSocialCreditAgents } from '../server/_core/socialCreditAgents';
 
 /**
  * DotRep MCP Server
@@ -31,6 +33,8 @@ class DotRepMCPServer {
   private dkgClient: DKGClient;
   private publisher: KnowledgeAssetPublisher;
   private aiAgents: ReturnType<typeof createAIAgents>;
+  private socialCreditAgents: ReturnType<typeof createSocialCreditAgents>;
+  private conversationalBuilder?: ConversationalCampaignBuilder;
 
   constructor() {
     this.server = new Server(
@@ -55,7 +59,9 @@ class DotRepMCPServer {
         fallbackToMock,
       });
       this.publisher = new KnowledgeAssetPublisher(this.dkgClient);
-      this.aiAgents = createAIAgents(this.dkgClient, getPolkadotApi());
+      const polkadotApi = getPolkadotApi();
+      this.aiAgents = createAIAgents(this.dkgClient, polkadotApi);
+      this.socialCreditAgents = createSocialCreditAgents(this.dkgClient, polkadotApi);
     } catch (error: any) {
       console.error('⚠️  Failed to initialize DKG client, using mock mode:', error.message);
       // If initialization fails completely, use mock mode
@@ -64,7 +70,15 @@ class DotRepMCPServer {
         fallbackToMock: false,
       });
       this.publisher = new KnowledgeAssetPublisher(this.dkgClient);
-      this.aiAgents = createAIAgents(this.dkgClient, getPolkadotApi());
+      const polkadotApi = getPolkadotApi();
+      const x402GatewayUrl = process.env.X402_GATEWAY_URL || 'http://localhost:4001';
+      this.aiAgents = createAIAgents(this.dkgClient, polkadotApi, x402GatewayUrl);
+      this.socialCreditAgents = createSocialCreditAgents(this.dkgClient, polkadotApi);
+      // Initialize conversational builder
+      this.conversationalBuilder = new ConversationalCampaignBuilder(
+        this.aiAgents.trustNavigator,
+        this.aiAgents.contractNegotiator
+      );
     }
 
     this.setupHandlers();
@@ -316,6 +330,236 @@ class DotRepMCPServer {
           },
         },
       },
+      {
+        name: 'verify_content',
+        description: 'Verify content using Umanitek Guardian AI Agent. Checks for deepfakes, CSAM, illicit content, and misinformation using privacy-preserving fingerprinting.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            content_url: {
+              type: 'string',
+              description: 'URL of the content to verify',
+            },
+            content_type: {
+              type: 'string',
+              enum: ['image', 'video', 'text'],
+              description: 'Type of content',
+              default: 'image',
+            },
+            check_type: {
+              type: 'string',
+              enum: ['deepfake', 'csam', 'misinformation', 'illicit', 'all'],
+              description: 'Type of check to perform',
+              default: 'all',
+            },
+          },
+          required: ['content_url'],
+        },
+      },
+      {
+        name: 'create_verification_community_note',
+        description: 'Create a Community Note from Guardian verification results and publish to DKG.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            target_ual: {
+              type: 'string',
+              description: 'UAL of the Knowledge Asset being verified',
+            },
+            verification_result: {
+              type: 'object',
+              description: 'Guardian verification result object',
+            },
+            author: {
+              type: 'string',
+              description: 'Author account ID or agent identifier',
+              default: 'did:dkg:umanitek-guardian',
+            },
+          },
+          required: ['target_ual', 'verification_result'],
+        },
+      },
+      {
+        name: 'get_creator_safety_score',
+        description: 'Get safety score for a creator based on Guardian verification history.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            creator_id: {
+              type: 'string',
+              description: 'Creator account ID or identifier',
+            },
+          },
+          required: ['creator_id'],
+        },
+      },
+      // Social Credit Marketplace Agent Tools
+      {
+        name: 'query_reputation_scores',
+        description: 'Query real-time reputation data from DKG for influencer discovery and matching. Returns reputation scores, social rank, economic stake, and sybil risk.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_did: {
+              type: 'string',
+              description: 'User DID or account identifier',
+            },
+            metrics: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Metrics to retrieve: social_rank, economic_stake, sybil_risk',
+              default: ['social_rank', 'economic_stake', 'sybil_risk'],
+            },
+          },
+          required: ['user_did'],
+        },
+      },
+      {
+        name: 'find_influencers',
+        description: 'Find influencers matching campaign requirements using natural language or structured criteria. Powered by Trust Navigator Agent.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Natural language query (e.g., "Find tech influencers with >0.8 reputation for gadget reviews") or JSON requirements',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of results',
+              default: 10,
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'detect_sybil_clusters',
+        description: 'Analyze social graph for fake account patterns and clusters. Returns cluster IDs, risk levels, and suspicious patterns.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            graph_data: {
+              type: 'string',
+              description: 'DKG UAL of graph data or account IDs to analyze',
+            },
+            analysis_depth: {
+              type: 'number',
+              description: 'Depth of cluster analysis (1-5)',
+              default: 3,
+            },
+          },
+        },
+      },
+      {
+        name: 'negotiate_endorsement_deal',
+        description: 'Negotiate endorsement deal terms using AI-powered contract optimization. Returns deal terms with x402 payment setup.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            influencer_did: {
+              type: 'string',
+              description: 'Influencer DID',
+            },
+            brand_did: {
+              type: 'string',
+              description: 'Brand DID',
+            },
+            campaign_requirements: {
+              type: 'object',
+              description: 'Campaign requirements (targetAudience, budget, campaignType, etc.)',
+            },
+            initial_terms: {
+              type: 'object',
+              description: 'Initial deal terms (paymentAmount, paymentToken, etc.)',
+            },
+          },
+          required: ['influencer_did', 'brand_did', 'campaign_requirements'],
+        },
+      },
+      {
+        name: 'initiate_x402_payment',
+        description: 'Start micro-payment flow for endorsement deal. Returns payment request with recipient, amount, and resource UAL.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            deal_id: {
+              type: 'string',
+              description: 'Endorsement deal ID',
+            },
+            amount: {
+              type: 'number',
+              description: 'Payment amount',
+            },
+            recipient: {
+              type: 'string',
+              description: 'Recipient DID',
+            },
+            conditions: {
+              type: 'object',
+              description: 'Payment conditions and requirements',
+            },
+          },
+          required: ['deal_id', 'amount', 'recipient'],
+        },
+      },
+      {
+        name: 'optimize_campaign_performance',
+        description: 'Analyze and optimize campaign performance in real-time. Returns recommendations and performance metrics.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            campaign_id: {
+              type: 'string',
+              description: 'Campaign ID',
+            },
+            deal_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of deal IDs in the campaign',
+            },
+          },
+          required: ['campaign_id', 'deal_ids'],
+        },
+      },
+      {
+        name: 'verify_reputation',
+        description: 'Continuous reputation verification with cross-source validation. Returns current reputation, verification status, and audit trail.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            did: {
+              type: 'string',
+              description: 'User DID to verify',
+            },
+            include_history: {
+              type: 'boolean',
+              description: 'Include reputation history',
+              default: false,
+            },
+          },
+          required: ['did'],
+        },
+      },
+      {
+        name: 'generate_transparency_report',
+        description: 'Generate transparency report for brands showing influencer verification, payment transparency, and sybil risk.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            campaign_id: {
+              type: 'string',
+              description: 'Campaign ID',
+            },
+            deal_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of deal IDs',
+            },
+          },
+          required: ['campaign_id', 'deal_ids'],
+        },
+      },
     ];
   }
 
@@ -372,6 +616,40 @@ class DotRepMCPServer {
 
           case 'get_impact_metrics':
             return await this.getImpactMetrics(args);
+
+          case 'verify_content':
+            return await this.verifyContent(args);
+
+          case 'create_verification_community_note':
+            return await this.createVerificationCommunityNote(args);
+
+          case 'get_creator_safety_score':
+            return await this.getCreatorSafetyScore(args);
+
+          // Social Credit Marketplace Agent Tools
+          case 'query_reputation_scores':
+            return await this.queryReputationScores(args);
+
+          case 'find_influencers':
+            return await this.findInfluencers(args);
+
+          case 'detect_sybil_clusters':
+            return await this.detectSybilClusters(args);
+
+          case 'negotiate_endorsement_deal':
+            return await this.negotiateEndorsementDeal(args);
+
+          case 'initiate_x402_payment':
+            return await this.initiateX402Payment(args);
+
+          case 'optimize_campaign_performance':
+            return await this.optimizeCampaignPerformance(args);
+
+          case 'verify_reputation':
+            return await this.verifyReputation(args);
+
+          case 'generate_transparency_report':
+            return await this.generateTransparencyReport(args);
 
           default:
             throw new Error(`Unknown tool: ${name}`);
@@ -836,6 +1114,403 @@ class DotRepMCPServer {
       }
     } catch (error) {
       throw new Error(`Failed to get impact metrics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Verify content using Guardian
+   */
+  private async verifyContent(args: any) {
+    const { content_url, content_type = 'image', check_type = 'all' } = args;
+
+    try {
+      const { getGuardianApi } = await import('../server/_core/guardianApi');
+      const guardianApi = getGuardianApi();
+
+      const verificationResult = await guardianApi.verifyContent({
+        contentUrl: content_url,
+        contentType: content_type,
+        checkType: check_type,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              status: verificationResult.status,
+              confidence: verificationResult.confidence,
+              matches: verificationResult.matches,
+              recommendedAction: verificationResult.recommendedAction,
+              evidenceUAL: verificationResult.evidenceUAL,
+              fingerprint: verificationResult.fingerprint.hash,
+              summary: verificationResult.summary,
+              processingTime: verificationResult.processingTime,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to verify content: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create verification Community Note
+   */
+  private async createVerificationCommunityNote(args: any) {
+    const { target_ual, verification_result, author = 'did:dkg:umanitek-guardian' } = args;
+
+    try {
+      const { getGuardianVerificationService } = await import('../dkg-integration/guardian-verification');
+      const service = getGuardianVerificationService();
+
+      const result = await service.createVerificationCommunityNote(
+        target_ual,
+        verification_result,
+        author
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              ual: result.ual,
+              note: result.note,
+              message: `Verification Community Note published successfully: ${result.ual}`,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to create verification Community Note: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get creator safety score
+   */
+  private async getCreatorSafetyScore(args: any) {
+    const { creator_id } = args;
+
+    try {
+      const { getGuardianVerificationService } = await import('../dkg-integration/guardian-verification');
+      const service = getGuardianVerificationService();
+
+      const safetyScore = await service.calculateCreatorSafetyScore(creator_id);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              creatorId: creator_id,
+              safetyScore: safetyScore.safetyScore,
+              totalVerifications: safetyScore.totalVerifications,
+              flaggedCount: safetyScore.flaggedCount,
+              averageConfidence: safetyScore.averageConfidence,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to get creator safety score: ${error.message}`);
+    }
+  }
+
+  /**
+   * Query reputation scores
+   */
+  private async queryReputationScores(args: any) {
+    const { user_did, metrics = ['social_rank', 'economic_stake', 'sybil_risk'] } = args;
+
+    try {
+      const query = `
+        PREFIX dotrep: <https://dotrep.io/ontology/>
+        SELECT ?reputation ?socialRank ?economicStake
+        WHERE {
+          <${user_did}> dotrep:reputationScore ?reputation .
+          OPTIONAL { <${user_did}> dotrep:socialRank ?socialRank . }
+          OPTIONAL { <${user_did}> dotrep:economicStake ?economicStake . }
+        }
+      `;
+
+      const results = await this.dkgClient.graphQuery(query, 'SELECT');
+      const result = results[0] || {};
+
+      // Get sybil risk from Sybil Detective
+      const sybilAnalysis = await this.socialCreditAgents.sybilDetective.analyzeAccount(user_did);
+      const sybilRisk = sybilAnalysis.confidence;
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              user_did,
+              reputation: parseFloat(result.reputation) || 0,
+              social_rank: parseFloat(result.socialRank) || 0,
+              economic_stake: parseFloat(result.economicStake) || 0,
+              sybil_risk: sybilRisk,
+              timestamp: new Date().toISOString(),
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to query reputation scores: ${error.message}`);
+    }
+  }
+
+  /**
+   * Find influencers using Trust Navigator
+   */
+  private async findInfluencers(args: any) {
+    const { query, limit = 10 } = args;
+
+    try {
+      const matches = await this.socialCreditAgents.trustNavigator.findInfluencers(query, limit);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              query,
+              resultCount: matches.length,
+              matches: matches.map(m => ({
+                influencer: m.influencer,
+                matchScore: m.matchScore,
+                estimatedROI: m.estimatedROI,
+                recommendedPayment: m.recommendedPayment,
+                reasoning: m.reasoning,
+              })),
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to find influencers: ${error.message}`);
+    }
+  }
+
+  /**
+   * Detect Sybil clusters
+   */
+  private async detectSybilClusters(args: any) {
+    const { graph_data, analysis_depth = 3 } = args;
+
+    try {
+      // For demo, use mock graph data
+      // In production, would query from DKG using graph_data UAL
+      const mockGraphData = [
+        {
+          accountId: 'did:example:1',
+          reputation: 100,
+          contributions: [{ timestamp: Date.now(), block: 1 }],
+          connections: [{ target: 'did:example:2', weight: 0.9 }],
+        },
+      ];
+
+      const clusters = await this.socialCreditAgents.sybilDetective.detectSybilClusters(mockGraphData);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              analysis_depth,
+              clusterCount: clusters.length,
+              clusters,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to detect Sybil clusters: ${error.message}`);
+    }
+  }
+
+  /**
+   * Negotiate endorsement deal
+   */
+  private async negotiateEndorsementDeal(args: any) {
+    const { influencer_did, brand_did, campaign_requirements, initial_terms = {} } = args;
+
+    try {
+      const deal = await this.socialCreditAgents.contractNegotiator.negotiateDeal(
+        influencer_did,
+        brand_did,
+        initial_terms,
+        campaign_requirements
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              deal,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to negotiate deal: ${error.message}`);
+    }
+  }
+
+  /**
+   * Initiate x402 payment
+   */
+  private async initiateX402Payment(args: any) {
+    const { deal_id, amount, recipient, conditions = {} } = args;
+
+    try {
+      // Get deal (would fetch from database in production)
+      const mockDeal = {
+        dealId: deal_id,
+        influencerDid: recipient,
+        brandDid: 'did:brand:1',
+        terms: {
+          paymentAmount: amount,
+          paymentToken: 'DOT',
+          deliverables: [],
+          timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+        },
+        status: 'pending' as const,
+      };
+
+      const x402Setup = await this.socialCreditAgents.contractNegotiator.setupX402Payment(mockDeal);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              paymentId: x402Setup.paymentId,
+              paymentRequest: x402Setup.paymentRequest,
+              message: 'x402 payment flow initiated. Provide payment proof to complete.',
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to initiate x402 payment: ${error.message}`);
+    }
+  }
+
+  /**
+   * Optimize campaign performance
+   */
+  private async optimizeCampaignPerformance(args: any) {
+    const { campaign_id, deal_ids } = args;
+
+    try {
+      // Get deals (would fetch from database in production)
+      const mockDeals = deal_ids.map((id: string) => ({
+        dealId: id,
+        influencerDid: `did:influencer:${id}`,
+        brandDid: 'did:brand:1',
+        terms: {
+          paymentAmount: 100,
+          paymentToken: 'DOT',
+          deliverables: [],
+          timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+        },
+        status: 'active' as const,
+      }));
+
+      const optimization = await this.socialCreditAgents.campaignOptimizer.optimizeCampaign(
+        campaign_id,
+        mockDeals
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              campaign_id,
+              optimization,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to optimize campaign: ${error.message}`);
+    }
+  }
+
+  /**
+   * Verify reputation
+   */
+  private async verifyReputation(args: any) {
+    const { did, include_history = false } = args;
+
+    try {
+      const verification = await this.socialCreditAgents.trustAuditor.verifyReputation(did, include_history);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              did,
+              verification,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to verify reputation: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate transparency report
+   */
+  private async generateTransparencyReport(args: any) {
+    const { campaign_id, deal_ids } = args;
+
+    try {
+      // Get deals (would fetch from database in production)
+      const mockDeals = deal_ids.map((id: string) => ({
+        dealId: id,
+        influencerDid: `did:influencer:${id}`,
+        brandDid: 'did:brand:1',
+        terms: {
+          paymentAmount: 100,
+          paymentToken: 'DOT',
+          deliverables: [],
+          timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+        },
+        status: 'active' as const,
+        receiptUAL: `ual:receipt:${id}`,
+      }));
+
+      const report = await this.socialCreditAgents.trustAuditor.generateTransparencyReport(
+        campaign_id,
+        mockDeals
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              campaign_id,
+              report,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      throw new Error(`Failed to generate transparency report: ${error.message}`);
     }
   }
 

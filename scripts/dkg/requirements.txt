@@ -1,0 +1,6 @@
+# Python dependencies for DKG integration scripts
+# Install with: pip install -r requirements.txt
+
+requests>=2.31.0
+networkx>=3.2.0
+

@@ -16,6 +16,7 @@ export interface ReputationCalculationRequest {
   algorithmWeights: Record<string, number>;
   timeDecayFactor: number;
   userId: string;
+  includeSafetyScore?: boolean; // Include Guardian safety score
 }
 
 export interface ReputationScore {
@@ -24,6 +25,8 @@ export interface ReputationScore {
   percentile: number;
   rank: number;
   lastUpdated: number;
+  safetyScore?: number; // Guardian safety score (0-1)
+  combinedScore?: number; // Reputation * safety score
 }
 
 export class ReputationCalculator {
@@ -31,7 +34,7 @@ export class ReputationCalculator {
    * Calculate reputation score with time decay
    */
   async calculateReputation(request: ReputationCalculationRequest): Promise<ReputationScore> {
-    const { contributions, algorithmWeights, timeDecayFactor, userId } = request;
+    const { contributions, algorithmWeights, timeDecayFactor, userId, includeSafetyScore = false } = request;
 
     // Calculate time-decayed scores
     const now = Date.now();
@@ -59,12 +62,35 @@ export class ReputationCalculator {
     // Get percentile from cloud database (or calculate locally)
     const percentile = await this.calculatePercentile(userId, overall);
 
+    // Get Guardian safety score if requested
+    let safetyScore: number | undefined;
+    let combinedScore: number | undefined;
+
+    if (includeSafetyScore) {
+      try {
+        const { getGuardianVerificationService } = await import('../../dkg-integration/guardian-verification');
+        const guardianService = getGuardianVerificationService();
+        const safetyData = await guardianService.calculateCreatorSafetyScore(userId);
+        safetyScore = safetyData.safetyScore;
+        
+        // Combined score: reputation weighted by safety
+        // Formula: overall * (0.7 + 0.3 * safetyScore)
+        // This ensures safety has meaningful impact but doesn't completely override reputation
+        combinedScore = overall * (0.7 + 0.3 * safetyScore);
+      } catch (error) {
+        console.warn(`Failed to get safety score for ${userId}:`, error);
+        // Continue without safety score
+      }
+    }
+
     return {
       overall: Math.round(overall),
       breakdown,
       percentile,
       rank: await this.calculateRank(userId),
-      lastUpdated: now
+      lastUpdated: now,
+      safetyScore,
+      combinedScore: combinedScore ? Math.round(combinedScore) : undefined,
     };
   }
 

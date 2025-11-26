@@ -78,6 +78,14 @@ export class KnowledgeAssetPublisherV8 {
     console.log(`📤 Publishing reputation for ${reputationData.developer.id}`);
     console.log(`   Score: ${asset.reputationScore}, Contributions: ${asset.contributions.length}`);
 
+    // Get cost estimate before publishing
+    const tokenomics = this.dkgClient.getTokenomicsService();
+    const costEstimate = tokenomics.estimatePublishCost(epochs, !!existingUAL);
+    console.log(`💰 Estimated cost: ${tokenomics.formatTRAC(costEstimate.tracFee)} + ${tokenomics.formatNEURO(costEstimate.neuroGasFee)}`);
+    if (costEstimate.totalCostUSD > 0) {
+      console.log(`   Total: $${costEstimate.totalCostUSD.toFixed(4)} USD`);
+    }
+
     // Publish to DKG
     const result = await this.dkgClient.publishReputationAsset(asset, epochs);
 
@@ -91,41 +99,63 @@ export class KnowledgeAssetPublisherV8 {
   }
 
   /**
-   * Batch publish multiple developers' reputations
+   * Batch publish multiple developers' reputations with cost optimization
+   * 
+   * Uses intelligent batching to reduce gas costs and provides detailed cost reporting
    * 
    * @param reputationDataList - Array of reputation data
    * @param options - Publishing options
-   * @returns Array of publish results
+   * @param options.batchSize - Size of each batch (default: optimal from tokenomics)
+   * @param options.delayBetweenBatches - Delay between batches in ms (default: 1000)
+   * @returns Batch publish results with cost information
    */
   async batchPublish(
     reputationDataList: ReputationData[],
-    options: PublishOptions = {}
-  ): Promise<PublishResult[]> {
+    options: PublishOptions & {
+      batchSize?: number;
+      delayBetweenBatches?: number;
+    } = {}
+  ): Promise<{
+    results: PublishResult[];
+    batchCostEstimate: import('./tokenomics-service').BatchPublishCostEstimate;
+    summary: {
+      totalPublished: number;
+      totalFailed: number;
+      totalTracSpent: bigint;
+      totalNeuroSpent: bigint;
+      totalCostUSD: number;
+    };
+  }> {
+    const { epochs = 2, batchSize, delayBetweenBatches } = options;
+    
     console.log(`📦 Starting batch publish for ${reputationDataList.length} developers`);
-    const results: PublishResult[] = [];
-    let successCount = 0;
-    let failureCount = 0;
-
-    for (let i = 0; i < reputationDataList.length; i++) {
-      const reputationData = reputationDataList[i];
-      try {
-        console.log(`\n[${i + 1}/${reputationDataList.length}] Processing ${reputationData.developer.id}`);
-        const result = await this.publishDeveloperReputation(reputationData, options);
-        results.push(result);
-        successCount++;
-        console.log(`✅ Published: ${result.UAL}`);
-      } catch (error: any) {
-        console.error(`❌ Failed to publish reputation for ${reputationData.developer.id}:`, error.message);
-        failureCount++;
-        results.push({
-          UAL: '',
-          error: error.message
-        } as any);
+    
+    // Convert to ReputationAsset format for batch publishing
+    const reputationAssets = reputationDataList.map(data => 
+      this.convertToReputationAsset(data, options.includePII || false)
+    );
+    
+    // Use DKG client's optimized batch publish
+    const batchResult = await this.dkgClient.batchPublishReputationAssets(
+      reputationAssets,
+      epochs,
+      { batchSize, delayBetweenBatches }
+    );
+    
+    // Map results back to PublishResult format and update cache
+    const mappedResults: PublishResult[] = batchResult.results.map((result, index) => {
+      if (result.UAL && reputationDataList[index]) {
+        this.ualCache.set(reputationDataList[index].developer.id, result.UAL);
+        this.storeUALMapping(reputationDataList[index].developer.id, result.UAL);
       }
-    }
-
-    console.log(`\n📊 Batch publish complete: ${successCount} succeeded, ${failureCount} failed`);
-    return results;
+      return result;
+    });
+    
+    return {
+      results: mappedResults,
+      batchCostEstimate: batchResult.batchCostEstimate,
+      summary: batchResult.summary
+    };
   }
 
   /**
@@ -337,6 +367,40 @@ export class KnowledgeAssetPublisherV8 {
    */
   getStatus() {
     return this.dkgClient.getStatus();
+  }
+
+  /**
+   * Get tokenomics service for cost estimation
+   */
+  getTokenomicsService() {
+    return this.dkgClient.getTokenomicsService();
+  }
+
+  /**
+   * Get fee statistics
+   */
+  getFeeStatistics() {
+    return this.dkgClient.getFeeStatistics();
+  }
+
+  /**
+   * Estimate cost for publishing a single developer's reputation
+   */
+  estimatePublishCost(
+    epochs: number = 2,
+    isUpdate: boolean = false
+  ): import('./tokenomics-service').PublishCostEstimate {
+    return this.dkgClient.getTokenomicsService().estimatePublishCost(epochs, isUpdate);
+  }
+
+  /**
+   * Estimate cost for batch publishing
+   */
+  estimateBatchPublishCost(
+    developerCount: number,
+    epochs: number = 2
+  ): import('./tokenomics-service').BatchPublishCostEstimate {
+    return this.dkgClient.getTokenomicsService().estimateBatchPublishCost(developerCount, epochs, false);
   }
 }
 

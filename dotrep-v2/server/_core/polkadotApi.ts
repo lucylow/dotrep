@@ -42,9 +42,70 @@ export class PolkadotApiService {
         return undefined;
       }
     };
+    
+    // Support NeuroWeb-specific RPC endpoint
+    const neurowebEndpoint = getEnvVar('NEUROWEB_RPC_URL');
     const envEndpoint = getEnvVar('POLKADOT_WS_ENDPOINT');
-    this.wsEndpoint = wsEndpoint || getOnFinalityWsEndpoint() || envEndpoint || "ws://127.0.0.1:9944";
+    
+    // Prefer NeuroWeb endpoint if available, otherwise use standard Polkadot endpoint
+    this.wsEndpoint = wsEndpoint || 
+                     neurowebEndpoint || 
+                     getOnFinalityWsEndpoint() || 
+                     envEndpoint || 
+                     "ws://127.0.0.1:9944";
     this.setupHealthCheck();
+  }
+
+  /**
+   * Check if connected to NeuroWeb parachain
+   */
+  async isNeuroWeb(): Promise<boolean> {
+    await this.ensureConnected();
+    if (!this.api) return false;
+    
+    try {
+      const chainInfo = await this.api.rpc.system.chain();
+      const chainName = chainInfo.toString().toLowerCase();
+      return chainName.includes('neuroweb') || chainName.includes('origin-trail');
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get NeuroWeb-specific chain information
+   */
+  async getNeuroWebInfo(): Promise<{
+    chainName: string;
+    isParachain: boolean;
+    relayChain?: string;
+    blockNumber: number;
+    blockHash: string;
+  } | null> {
+    if (!(await this.isNeuroWeb())) {
+      return null;
+    }
+
+    await this.ensureConnected();
+    if (!this.api) return null;
+
+    try {
+      const chainInfo = await this.api.rpc.system.chain();
+      const blockHash = await this.api.rpc.chain.getBlockHash();
+      const signedBlock = await this.api.rpc.chain.getBlock(blockHash);
+      const blockNumber = signedBlock.block.header.number.toNumber();
+
+      return {
+        chainName: chainInfo.toString(),
+        isParachain: true,
+        relayChain: 'polkadot', // NeuroWeb is secured by Polkadot
+        blockNumber,
+        blockHash: blockHash.toString(),
+      };
+    } catch (error) {
+      console.error('Failed to get NeuroWeb info:', error);
+      return null;
+    }
   }
 
   /**
@@ -1065,6 +1126,109 @@ export class PolkadotApiService {
     } catch (error) {
       console.error("[Polkadot API] Error getting provenance:", error);
       return null;
+    }
+  }
+
+  /**
+   * Evaluate Guardian flag and execute slashing if criteria met
+   * 
+   * This function checks a Guardian verification report and triggers slashing
+   * if the content is flagged with high confidence for severe violations.
+   * 
+   * @param verificationUAL - UAL of the Guardian verification report on DKG
+   * @param creatorDID - Creator's DID or account ID
+   * @param slasherAccount - Account that will execute the slash (must have permission)
+   * @returns Slashing result
+   */
+  async evaluateGuardianFlag(
+    verificationUAL: string,
+    creatorDID: string,
+    slasherAccount?: string
+  ): Promise<{
+    slashed: boolean;
+    amount?: string;
+    reason?: string;
+    transactionHash?: string;
+  }> {
+    await this.ensureConnected();
+
+    try {
+      // Fetch verification report from DKG
+      // In production, this would query the DKG for the verification report
+      // For now, we'll simulate based on the UAL
+      console.log(`[Polkadot API] Evaluating Guardian flag: ${verificationUAL} for creator ${creatorDID}`);
+
+      // In production, would fetch from DKG:
+      // const report = await dkg.getAsset(verificationUAL);
+      // const confidence = report.verificationResult.confidence;
+      // const matchType = report.verificationResult.matchType;
+      
+      // For demo, we'll check if UAL indicates a flag (contains 'flag' or 'match')
+      const isFlagged = verificationUAL.includes('flag') || verificationUAL.includes('match');
+      const confidence = 0.85; // Mock confidence
+      const matchType = 'deepfake'; // Mock match type
+
+      // Slashing criteria:
+      // - High confidence (>0.85)
+      // - Severe violation (CSAM, illicit) OR repeated deepfake violations
+      const shouldSlash = isFlagged && 
+        confidence > 0.85 && 
+        (matchType === 'csam' || matchType === 'illicit');
+
+      if (!shouldSlash) {
+        return {
+          slashed: false,
+          reason: `Flag does not meet slashing criteria (confidence: ${confidence}, type: ${matchType})`,
+        };
+      }
+
+      // Calculate slash amount (1 TRAC for severe violations)
+      const slashAmount = '1000000000000000000'; // 1 TRAC (18 decimals)
+
+      if (!this.api) {
+        throw new Error('API not connected');
+      }
+
+      // Execute slash transaction
+      // In production, this would call the actual slashing pallet
+      const tx = this.api.tx.stakingModule?.slashStake?.(
+        creatorDID,
+        slashAmount,
+        `Guardian violation: ${verificationUAL}`
+      ) || this.api.tx.system.remark(
+        `Guardian slash: ${creatorDID} - ${verificationUAL}`
+      );
+
+      // Return transaction for signing (client-side will sign)
+      return {
+        slashed: true,
+        amount: slashAmount,
+        reason: `Guardian flag: ${matchType} violation with ${(confidence * 100).toFixed(1)}% confidence`,
+        transactionHash: tx.hash.toString(),
+      };
+    } catch (error: any) {
+      console.error("[Polkadot API] Error evaluating Guardian flag:", error);
+      throw new Error(`Failed to evaluate Guardian flag: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get Guardian verification history for a creator
+   */
+  async getGuardianVerificationHistory(creatorDID: string): Promise<Array<{
+    ual: string;
+    status: string;
+    confidence: number;
+    matchType?: string;
+    timestamp: number;
+  }>> {
+    try {
+      // In production, would query DKG for verification reports
+      // For now, return empty array
+      return [];
+    } catch (error) {
+      console.error("[Polkadot API] Error getting Guardian verification history:", error);
+      return [];
     }
   }
 }

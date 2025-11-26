@@ -1,0 +1,23 @@
+# Query: Fetch Post temporal interaction metrics for posts authored by creators
+# Purpose: Get engagement data (likes/views/comments over time) for reputation signals
+
+PREFIX schema: <https://schema.org/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+
+SELECT ?post ?author ?datePublished ?obsDate ?interactionType ?interactionCount WHERE {
+  ?post a schema:SocialMediaPosting ;
+        schema:author ?author ;
+        schema:datePublished ?datePublished .
+  ?obs a prov:Entity, schema:Observation ;
+       prov:specializationOf ?post ;
+       schema:observationDate ?obsDate .
+  OPTIONAL {
+    ?obs schema:interactionStatistic ?stat .
+    ?stat a schema:InteractionCounter ;
+          schema:interactionType ?interactionType ;
+          schema:userInteractionCount ?interactionCount .
+  }
+}
+ORDER BY DESC(?obsDate)
+LIMIT 5000
+

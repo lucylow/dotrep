@@ -187,6 +187,110 @@ app.get('/receipt/:ual', (req, res) => {
   });
 });
 
+// Premium Safety Feed: Certified Safe Creators (x402 protected)
+// This endpoint returns a list of creators with high safety scores from Guardian
+app.get('/api/verified-creators', async (req, res) => {
+  const paymentProofHeader = req.headers['x-payment-proof'];
+  const amount = 10; // 10 USDC in cents
+  
+  // Payment policy for this premium endpoint
+  const policy = {
+    amount: amount.toString(),
+    token: 'USDC',
+    recipient: process.env.X402_RECIPIENT || '0x0000000000000000000000000000000000000000',
+    resourceUAL: 'urn:ual:trusted:feed:verified-creators'
+  };
+
+  // Check if payment proof provided
+  if (paymentProofHeader) {
+    try {
+      const proof = JSON.parse(paymentProofHeader);
+      
+      if (!validatePaymentProof(proof)) {
+        res.status(402).setHeader('X-Payment-Request', JSON.stringify(policy));
+        return res.status(402).json({
+          error: 'Invalid payment proof',
+          paymentRequest: policy
+        });
+      }
+      
+      // Store proof
+      paymentProofs.set(proof.tx, proof);
+      
+      // Query DKG for safe creators using SPARQL
+      // This uses the Guardian safety score query from the blueprint
+      const safeCreatorsQuery = `
+        PREFIX schema: <https://schema.org/>
+        PREFIX dotrep: <https://dotrep.io/ontology/>
+        PREFIX guardian: <https://guardian.umanitek.ai/schema/>
+        
+        SELECT ?creator ?name ?safetyScore ?totalVerifications
+        WHERE {
+          ?profile a dotrep:TrustedUserProfile .
+          ?profile dotrep:creator ?creator .
+          OPTIONAL { ?profile schema:name ?name . }
+          ?profile dotrep:reputationMetrics/dotrep:safetyScore ?safetyScore .
+          ?profile dotrep:reputationMetrics/dotrep:totalVerifications ?totalVerifications .
+          FILTER(?safetyScore >= 0.9 && ?totalVerifications > 0)
+        }
+        ORDER BY DESC(?safetyScore)
+        LIMIT 50
+      `;
+
+      // In production, this would query the actual DKG
+      // For demo, return mock safe creators
+      const safeCreators = [
+        {
+          creator: 'did:dkg:creator:alice',
+          name: 'Alice Developer',
+          safetyScore: 0.95,
+          totalVerifications: 25,
+          reputationScore: 0.88
+        },
+        {
+          creator: 'did:dkg:creator:bob',
+          name: 'Bob Creator',
+          safetyScore: 0.93,
+          totalVerifications: 18,
+          reputationScore: 0.85
+        },
+        {
+          creator: 'did:dkg:creator:charlie',
+          name: 'Charlie Verified',
+          safetyScore: 0.91,
+          totalVerifications: 12,
+          reputationScore: 0.82
+        }
+      ];
+
+      // Publish ReceiptAsset
+      const receiptAsset = createReceiptAsset(policy, proof);
+      const publishResult = await publishReceiptAsset(receiptAsset);
+      
+      // Return safe creators with receipt UAL
+      return res.json({
+        resource: 'verified-creators',
+        creators: safeCreators,
+        query: safeCreatorsQuery,
+        receiptUAL: publishResult.ual,
+        receiptAsset: receiptAsset,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      return res.status(400).json({ error: 'Invalid payment proof format' });
+    }
+  }
+  
+  // Return 402 Payment Required
+  res.status(402).setHeader('X-Payment-Request', JSON.stringify(policy));
+  res.json({
+    error: 'Payment Required',
+    paymentRequest: policy,
+    message: 'This endpoint provides access to certified safe creators based on Guardian verification. Include X-Payment-Proof header with payment transaction proof.',
+    description: 'Returns creators with safety scores >= 0.9 from Umanitek Guardian verification history'
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`x402 Gateway running on http://localhost:${PORT}`);
   console.log(`Edge Node URL: ${EDGE_PUBLISH_URL}`);

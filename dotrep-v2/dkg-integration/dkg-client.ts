@@ -78,15 +78,17 @@ export class DKGClient {
    * Resolve DKG configuration based on environment
    */
   private resolveConfig(config?: DKGConfig): DKGConfig {
-    const environment = config?.environment || process.env.DKG_ENVIRONMENT || 'testnet';
+    const env = config?.environment || process.env.DKG_ENVIRONMENT || 'testnet';
+    const environment: 'testnet' | 'mainnet' | 'local' = 
+      (env === 'testnet' || env === 'mainnet' || env === 'local') ? env : 'testnet';
     
-    const endpoints = {
+    const endpoints: Record<'testnet' | 'mainnet' | 'local', string> = {
       testnet: 'https://v6-pegasus-node-02.origin-trail.network:8900',
       mainnet: 'https://positron.origin-trail.network',
       local: 'http://localhost:8900'
     };
 
-    const blockchains = {
+    const blockchains: Record<'testnet' | 'mainnet' | 'local', string> = {
       testnet: 'otp:20430',
       mainnet: 'otp:2043',
       local: 'hardhat1:31337'
@@ -320,7 +322,8 @@ export class DKGClient {
       return await this.publishReputationAsset(mergedData as ReputationAsset);
     } catch (error) {
       console.error(`Failed to update reputation asset ${ual}:`, error);
-      throw new Error(`Asset update failed: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Asset update failed: ${message}`);
     }
   }
 
@@ -453,7 +456,8 @@ export class DKGClient {
       return results;
     } catch (error) {
       console.error('Failed to execute graph query:', error);
-      throw new Error(`Graph query failed: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Graph query failed: ${message}`);
     }
   }
 }

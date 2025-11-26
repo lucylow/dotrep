@@ -9,7 +9,8 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
+from datetime import datetime
 import numpy as np
 
 # Try to import networkx
@@ -19,6 +20,19 @@ try:
 except ImportError:
     NETWORKX_AVAILABLE = False
     print("Warning: networkx not installed, using simplified graph computation")
+
+# Import advanced components
+try:
+    from advanced_graph_analyzer import AdvancedGraphAnalyzer
+    from enhanced_sybil_detector import EnhancedSybilDetector
+    from guardian_integrator import GuardianIntegrator
+    from reputation_engine import ReputationEngine
+    from dkg_reputation_publisher import DKGReputationPublisher
+    ADVANCED_AVAILABLE = True
+except ImportError as e:
+    ADVANCED_AVAILABLE = False
+    print(f"Warning: Advanced components not available: {e}")
+    print("Falling back to basic reputation computation")
 
 # Import publisher from ingest service
 # Try multiple paths for flexibility
@@ -59,9 +73,24 @@ def compute_weighted_pagerank(
     edges: List[Tuple[str, str, float]],
     alpha: float = 0.25,
     max_iter: int = 100,
-    tol: float = 1e-6
+    tol: float = 1e-6,
+    edge_timestamps: Optional[Dict[Tuple[str, str], datetime]] = None,
+    node_activity: Optional[Dict[str, float]] = None,
+    use_enhanced: bool = True
 ) -> Dict[str, float]:
-    """Compute weighted PageRank scores"""
+    """
+    Compute weighted PageRank scores with optional temporal enhancements
+    
+    Args:
+        nodes: List of node identifiers
+        edges: List of (source, target, weight) tuples
+        alpha: PageRank damping factor
+        max_iter: Maximum iterations
+        tol: Convergence tolerance
+        edge_timestamps: Optional timestamps for edges (for temporal weighting)
+        node_activity: Optional activity scores for nodes
+        use_enhanced: Whether to use enhanced temporal PageRank
+    """
     if not NETWORKX_AVAILABLE:
         # Simplified computation without networkx
         scores = {node: 1.0 / len(nodes) for node in nodes}
@@ -81,6 +110,103 @@ def compute_weighted_pagerank(
     for source, target, weight in edges:
         G.add_edge(source, target, weight=weight)
     
+    # Use enhanced temporal PageRank if available and requested
+    if use_enhanced and edge_timestamps is not None:
+        try:
+            from enhanced_pagerank import TemporalPageRank
+            temporal_pr = TemporalPageRank(alpha=alpha, max_iter=max_iter, tol=tol)
+            return temporal_pr.compute(G, edge_timestamps, node_activity)
+        except ImportError:
+            print("Warning: enhanced_pagerank not available, using standard PageRank")
+    
+    pagerank = nx.pagerank(G, alpha=alpha, max_iter=max_iter, tol=tol, weight='weight')
+    return pagerank
+
+
+def compute_temporal_weighted_pagerank(
+    nodes: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    alpha: float = 0.85,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+    temporal_decay: float = 0.1,
+    recency_weight: float = 0.3
+) -> Dict[str, float]:
+    """
+    Compute Temporal Weighted PageRank (UWUSRank-inspired)
+    
+    Accounts for:
+    - Edge recency (recent interactions weighted higher)
+    - Edge weights (endorsement strength, stake, payments)
+    - Temporal decay for older edges
+    
+    Args:
+        nodes: List of node dicts with 'id' and optional metadata
+        edges: List of edge dicts with 'source', 'target', 'weight', 'timestamp', and optional metadata
+        alpha: Damping factor (default: 0.85)
+        max_iter: Maximum iterations (default: 100)
+        tol: Convergence tolerance (default: 1e-6)
+        temporal_decay: Decay factor for old edges (default: 0.1)
+        recency_weight: Weight for recent activity (default: 0.3)
+    
+    Returns:
+        Dict mapping node ID to PageRank score
+    """
+    import time
+    
+    if not NETWORKX_AVAILABLE:
+        # Fallback to basic weighted PageRank
+        node_ids = [n['id'] if isinstance(n, dict) else n for n in nodes]
+        edge_tuples = [(e['source'], e['target'], e.get('weight', 1.0)) for e in edges]
+        return compute_weighted_pagerank(node_ids, edge_tuples, alpha, max_iter, tol)
+    
+    G = nx.DiGraph()
+    
+    # Add nodes
+    node_ids = []
+    for node in nodes:
+        node_id = node['id'] if isinstance(node, dict) else node
+        node_ids.append(node_id)
+        G.add_node(node_id, **({} if isinstance(node, dict) else {}))
+    
+    # Add edges with temporal and enhanced weights
+    now = time.time() * 1000  # milliseconds
+    max_age = 365 * 24 * 60 * 60 * 1000  # 1 year in ms
+    
+    for edge in edges:
+        source = edge['source']
+        target = edge['target']
+        base_weight = edge.get('weight', 1.0)
+        timestamp = edge.get('timestamp', now)
+        
+        # Calculate temporal decay
+        age = now - timestamp
+        age_in_years = age / max_age
+        temporal_factor = np.exp(-temporal_decay * age_in_years)
+        
+        # Enhance weight based on metadata
+        enhanced_weight = base_weight
+        
+        # Boost for stake-backed edges
+        if edge.get('metadata', {}).get('stakeBacked'):
+            enhanced_weight *= 1.2
+        
+        # Boost for payment-backed edges
+        if edge.get('metadata', {}).get('paymentAmount'):
+            payment_amount = edge['metadata']['paymentAmount']
+            payment_boost = min(1, np.log(1 + payment_amount / 1000) / 10)
+            enhanced_weight *= (1 + 0.15 * payment_boost)
+        
+        # Boost for verified endorsements
+        if edge.get('metadata', {}).get('verified'):
+            enhanced_weight *= 1.2
+        
+        # Apply temporal decay
+        final_weight = enhanced_weight * (recency_weight + (1 - recency_weight) * temporal_factor)
+        
+        G.add_edge(source, target, weight=final_weight)
+    
+    # Compute PageRank
     pagerank = nx.pagerank(G, alpha=alpha, max_iter=max_iter, tol=tol, weight='weight')
     return pagerank
 
@@ -90,8 +216,14 @@ def detect_sybil_clusters(
     edges: List[Tuple[str, str, float]],
     pagerank_scores: Dict[str, float]
 ) -> Dict[str, float]:
-    """Detect potential Sybil clusters and compute penalty scores"""
-    # Simple heuristic: nodes with very low PageRank and high in-degree from low-reputation nodes
+    """
+    Detect potential Sybil clusters and compute penalty scores
+    
+    Improved heuristic based on graph structure analysis:
+    - High in-degree but low PageRank (z-score < -1)
+    - Very high out-degree (potential spam)
+    - Low reciprocity (many incoming but few outgoing)
+    """
     if not NETWORKX_AVAILABLE:
         # Simplified: penalize nodes with very low scores
         penalties = {}
@@ -109,16 +241,33 @@ def detect_sybil_clusters(
     for source, target, weight in edges:
         G.add_edge(source, target, weight=weight)
     
+    # Compute statistics for z-score calculation
+    scores_array = list(pagerank_scores.values())
+    mean_score = np.mean(scores_array) if scores_array else 0
+    std_score = np.std(scores_array) if len(scores_array) > 1 and scores_array else 1
+    
     penalties = {}
     for node in nodes:
         in_degree = G.in_degree(node)
+        out_degree = G.out_degree(node)
         score = pagerank_scores.get(node, 0)
+        z_score = (score - mean_score) / std_score if std_score > 0 else 0
         
-        # Heuristic: if node has many incoming edges but low PageRank, likely Sybil
-        if in_degree > 5 and score < 0.01:
-            penalties[node] = min(0.2, in_degree * 0.02)
-        else:
-            penalties[node] = 0.0
+        sybil_probability = 0.0
+        
+        # Pattern 1: High in-degree but low PageRank (z-score < -1)
+        if z_score < -1 and in_degree > 5:
+            sybil_probability += 0.4
+        
+        # Pattern 2: Very high out-degree (potential spam)
+        if out_degree > 20 and in_degree < 2:
+            sybil_probability += 0.3
+        
+        # Pattern 3: Low reciprocity (many incoming but few outgoing)
+        if in_degree > 10 and out_degree < 2:
+            sybil_probability += 0.3
+        
+        penalties[node] = min(1.0, sybil_probability)
     
     return penalties
 
@@ -139,26 +288,96 @@ def apply_stake_weighting(
 def compute_final_reputation(
     pagerank_scores: Dict[str, float],
     stake_weights: Dict[str, float],
-    sybil_penalties: Dict[str, float]
+    sybil_penalties: Dict[str, float],
+    quality_scores: Dict[str, float] = None,
+    payment_scores: Dict[str, float] = None,
+    weights: Dict[str, float] = None
 ) -> Dict[str, Dict[str, float]]:
-    """Compute final reputation scores with all components"""
+    """
+    Compute hybrid final reputation scores with all components
+    
+    Combines:
+    - Graph structure (PageRank)
+    - Stake weighting
+    - Quality signals
+    - Payment history
+    - Sybil penalties
+    
+    Args:
+        pagerank_scores: PageRank scores from graph algorithm
+        stake_weights: Stake-based weights
+        sybil_penalties: Sybil detection penalties
+        quality_scores: Content/contribution quality scores (optional)
+        payment_scores: Payment history scores (optional)
+        weights: Custom weights for components (default: graph=0.5, quality=0.25, stake=0.15, payment=0.1)
+    
+    Returns:
+        Dict mapping node ID to reputation breakdown
+    """
+    if quality_scores is None:
+        quality_scores = {}
+    if payment_scores is None:
+        payment_scores = {}
+    if weights is None:
+        weights = {
+            'graph': 0.5,
+            'quality': 0.25,
+            'stake': 0.15,
+            'payment': 0.1
+        }
+    
+    # Normalize PageRank scores to 0-1000 range
+    pr_values = list(pagerank_scores.values())
+    pr_min = min(pr_values) if pr_values else 0
+    pr_max = max(pr_values) if pr_values else 1
+    pr_range = pr_max - pr_min if pr_max > pr_min else 1
+    
     results = {}
+    all_final_scores = []
     
     for node in pagerank_scores:
+        # Normalize graph score
         graph_score = pagerank_scores[node]
+        normalized_graph_score = ((graph_score - pr_min) / pr_range) * 1000
+        
+        # Extract component scores
         stake_weight = stake_weights.get(node, 0.0)
+        stake_score = min(1000, np.log(1 + stake_weight / 100) * 200) if stake_weight > 0 else 0
+        
+        quality_score = quality_scores.get(node, 0) * 10  # scale 0-100 to 0-1000
+        payment_score = min(1000, np.log(1 + payment_scores.get(node, 0) / 1000) * 200) if payment_scores.get(node, 0) > 0 else 0
+        
         sybil_penalty = sybil_penalties.get(node, 0.0)
         
-        # Final score: graph score * (1 + stake boost) - sybil penalty
-        final_score = graph_score * (1.0 + stake_weight * 0.1) - sybil_penalty
-        final_score = max(0.0, min(1.0, final_score))  # Clamp to [0, 1]
+        # Compute weighted hybrid score
+        final_score = (
+            normalized_graph_score * weights['graph'] +
+            quality_score * weights['quality'] +
+            stake_score * weights['stake'] +
+            payment_score * weights['payment']
+        )
+        
+        # Apply Sybil penalty
+        final_score = final_score * (1.0 - sybil_penalty * 0.5)
+        final_score = max(0.0, min(1000.0, final_score))  # Clamp to [0, 1000]
+        
+        all_final_scores.append(final_score)
         
         results[node] = {
             "reputationScore": final_score,
-            "graphScore": graph_score,
+            "graphScore": normalized_graph_score,
+            "qualityScore": quality_score,
+            "stakeScore": stake_score,
+            "paymentScore": payment_score,
             "stakeWeight": stake_weight,
             "sybilPenalty": sybil_penalty
         }
+    
+    # Compute percentiles
+    all_final_scores.sort(reverse=True)
+    for node, data in results.items():
+        rank = next((i for i, score in enumerate(all_final_scores) if score <= data["reputationScore"]), len(all_final_scores))
+        data["percentile"] = ((len(all_final_scores) - rank) / len(all_final_scores)) * 100
     
     return results
 
@@ -208,6 +427,8 @@ def main():
     parser.add_argument("--simulate", action="store_true", help="Simulate publishing")
     parser.add_argument("--test", action="store_true", help="Run synthetic Sybil test")
     parser.add_argument("--output", type=str, help="Output file for results (JSON)")
+    parser.add_argument("--advanced", action="store_true", help="Use advanced multi-dimensional analysis")
+    parser.add_argument("--demo", action="store_true", help="Run complete demo")
     
     args = parser.parse_args()
     
@@ -215,6 +436,10 @@ def main():
         results = run_sybil_test()
         print(json.dumps(results, indent=2))
         return 0
+    
+    # Use advanced analysis if available and requested
+    if args.advanced and ADVANCED_AVAILABLE:
+        return run_advanced_analysis(args)
     
     # Load graph
     graph_data = load_graph(args.input)
@@ -275,6 +500,115 @@ def main():
                 print(f"Error publishing {node_id}: {e}", file=sys.stderr)
         
         print(f"\nPublished {len(published)} ReputationAssets")
+    
+    return 0
+
+
+def run_advanced_analysis(args):
+    """Run advanced multi-dimensional reputation analysis"""
+    import networkx as nx
+    
+    print("🚀 Running Advanced Multi-Dimensional Reputation Analysis")
+    print("=" * 60)
+    
+    # Load graph
+    graph_data = load_graph(args.input)
+    
+    # Build NetworkX graph
+    G = nx.DiGraph()
+    for node in graph_data.get("nodes", []):
+        if isinstance(node, dict):
+            node_id = node.get("id")
+            G.add_node(node_id, **{k: v for k, v in node.items() if k != "id"})
+        else:
+            G.add_node(node)
+    
+    for edge in graph_data.get("edges", []):
+        if isinstance(edge, dict):
+            source = edge.get("source")
+            target = edge.get("target")
+            weight = edge.get("weight", 1.0)
+            G.add_edge(source, target, weight=weight)
+    
+    print(f"✓ Loaded graph: {len(G.nodes())} nodes, {len(G.edges())} edges")
+    
+    # Initialize components
+    guardian = GuardianIntegrator(mock_mode=True)
+    analyzer = AdvancedGraphAnalyzer(G, guardian)
+    sybil_detector = EnhancedSybilDetector(G)
+    analyzer.sybil_detector = sybil_detector
+    reputation_engine = ReputationEngine(analyzer, guardian)
+    
+    # Get stake data
+    stake_data_map = {}
+    for node in graph_data.get("nodes", []):
+        if isinstance(node, dict):
+            node_id = node.get("id")
+            stake = node.get("stake", 0.0)
+            if stake > 0:
+                stake_data_map[node_id] = {"stake_amount": stake}
+    
+    # Compute reputation for all nodes
+    print(f"\nComputing reputation for {len(G.nodes())} nodes...")
+    all_nodes = list(G.nodes())
+    reputation_results = reputation_engine.batch_compute_reputation(all_nodes, stake_data_map=stake_data_map)
+    
+    print(f"✓ Computed reputation for {len(reputation_results)} users")
+    
+    # Prepare results
+    formatted_results = {}
+    for user_did, rep_data in reputation_results.items():
+        formatted_results[user_did] = {
+            "reputationScore": rep_data.get("final_reputation", 0.0),
+            "graphScore": rep_data.get("component_scores", {}).get("structural", {}).get("combined", 0.0),
+            "stakeWeight": rep_data.get("component_scores", {}).get("economic", {}).get("stake_score", 0.0),
+            "sybilPenalty": rep_data.get("sybil_penalty", 0.0),
+            "confidence": rep_data.get("confidence", 0.0),
+            "riskLevel": rep_data.get("risk_factors", {}).get("risk_level", "unknown")
+        }
+    
+    results = {
+        "computed_at": str(Path(args.input).stat().st_mtime),
+        "method": "advanced_multi_dimensional",
+        "reputations": formatted_results,
+        "summary": {
+            "total_users": len(reputation_results),
+            "avg_reputation": sum(r.get("final_reputation", 0) for r in reputation_results.values()) / len(reputation_results) if reputation_results else 0,
+            "high_risk_users": sum(1 for r in reputation_results.values() if r.get("risk_factors", {}).get("overall_risk", 0) > 0.6)
+        }
+    }
+    
+    # Publish to DKG if requested
+    if args.publish:
+        print("\n📤 Publishing reputation snapshot to DKG...")
+        dkg_publisher = DKGReputationPublisher()
+        analysis_metadata = dkg_publisher.get_analysis_metadata(
+            len(G.nodes()),
+            reputation_results,
+            sybil_detector._get_communities() if hasattr(sybil_detector, '_get_communities') else {}
+        )
+        snapshot_result = dkg_publisher.publish_reputation_snapshot(reputation_results, analysis_metadata)
+        results["dkg_snapshot"] = snapshot_result
+        print(f"✓ Published: {snapshot_result.get('ual', 'N/A')}")
+    
+    # Output results
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(results, f, indent=2, default=str)
+        print(f"\n✓ Results written to {args.output}")
+    else:
+        print("\n" + "=" * 60)
+        print("RESULTS SUMMARY")
+        print("=" * 60)
+        print(json.dumps(results["summary"], indent=2))
+        print(f"\nTop 5 Users by Reputation:")
+        sorted_users = sorted(
+            formatted_results.items(),
+            key=lambda x: x[1]["reputationScore"],
+            reverse=True
+        )[:5]
+        for user, data in sorted_users:
+            print(f"  {user}: {data['reputationScore']:.3f} (risk: {data.get('riskLevel', 'unknown')})")
     
     return 0
 

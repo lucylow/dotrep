@@ -25,8 +25,255 @@ const contributorIdWithLimitSchema = z.object({
   limit: z.number().int().min(1).max(500).optional(),
 });
 
+import { createSocialCreditAgents } from './_core/socialCreditAgents';
+import { DKGClient } from '../dkg-integration/dkg-client';
+import { getPolkadotApi } from './_core/polkadotApi';
+
 export const appRouter = router({
   system: systemRouter,
+  
+  agents: router({
+    /**
+     * Find influencers using Trust Navigator Agent
+     */
+    findInfluencers: publicProcedure
+      .input(z.object({
+        query: z.union([z.string(), z.object({
+          targetAudience: z.string(),
+          minReputation: z.number().optional(),
+          maxSybilRisk: z.number().optional(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+          budget: z.number().optional(),
+          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']).optional(),
+        })]),
+        limit: z.number().min(1).max(50).default(10),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const matches = await agents.trustNavigator.findInfluencers(input.query, input.limit);
+          return { success: true, matches };
+        } catch (error) {
+          logError(error, { operation: 'findInfluencers', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Detect Sybil clusters
+     */
+    detectSybilClusters: publicProcedure
+      .input(z.object({
+        accountIds: z.array(z.string()).optional(),
+        analysisDepth: z.number().min(1).max(5).default(3),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
+          
+          // Mock graph data for demo
+          const graphData = (input.accountIds || []).map(id => ({
+            accountId: id,
+            reputation: 100,
+            contributions: [{ timestamp: Date.now(), block: 1 }],
+            connections: [],
+          }));
+          
+          const clusters = await agents.sybilDetective.detectSybilClusters(graphData);
+          return { success: true, clusters };
+        } catch (error) {
+          logError(error, { operation: 'detectSybilClusters', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Negotiate endorsement deal
+     */
+    negotiateDeal: publicProcedure
+      .input(z.object({
+        influencerDid: z.string(),
+        brandDid: z.string(),
+        campaignRequirements: z.object({
+          targetAudience: z.string(),
+          minReputation: z.number().optional(),
+          maxSybilRisk: z.number().optional(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+          budget: z.number().optional(),
+          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']),
+        }),
+        initialTerms: z.object({
+          paymentAmount: z.number().optional(),
+          paymentToken: z.string().optional(),
+        }).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const deal = await agents.contractNegotiator.negotiateDeal(
+            input.influencerDid,
+            input.brandDid,
+            input.initialTerms || {},
+            input.campaignRequirements
+          );
+          
+          return { success: true, deal };
+        } catch (error) {
+          logError(error, { operation: 'negotiateDeal', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Setup x402 payment for deal
+     */
+    setupX402Payment: publicProcedure
+      .input(z.object({
+        dealId: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          // Get deal (would fetch from database in production)
+          const mockDeal = {
+            dealId: input.dealId,
+            influencerDid: 'did:influencer:1',
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'pending' as const,
+          };
+          
+          const x402Setup = await agents.contractNegotiator.setupX402Payment(mockDeal);
+          return { success: true, ...x402Setup };
+        } catch (error) {
+          logError(error, { operation: 'setupX402Payment', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Optimize campaign performance
+     */
+    optimizeCampaign: publicProcedure
+      .input(z.object({
+        campaignId: z.string(),
+        dealIds: z.array(z.string()),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
+          
+          // Get deals (would fetch from database in production)
+          const mockDeals = input.dealIds.map(id => ({
+            dealId: id,
+            influencerDid: `did:influencer:${id}`,
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'active' as const,
+          }));
+          
+          const optimization = await agents.campaignOptimizer.optimizeCampaign(
+            input.campaignId,
+            mockDeals
+          );
+          
+          return { success: true, optimization };
+        } catch (error) {
+          logError(error, { operation: 'optimizeCampaign', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Verify reputation
+     */
+    verifyReputation: publicProcedure
+      .input(z.object({
+        did: z.string(),
+        includeHistory: z.boolean().default(false),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const verification = await agents.trustAuditor.verifyReputation(
+            input.did,
+            input.includeHistory
+          );
+          
+          return { success: true, verification };
+        } catch (error) {
+          logError(error, { operation: 'verifyReputation', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Generate transparency report
+     */
+    generateTransparencyReport: publicProcedure
+      .input(z.object({
+        campaignId: z.string(),
+        dealIds: z.array(z.string()),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          // Get deals (would fetch from database in production)
+          const mockDeals = input.dealIds.map(id => ({
+            dealId: id,
+            influencerDid: `did:influencer:${id}`,
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'active' as const,
+            receiptUAL: `ual:receipt:${id}`,
+          }));
+          
+          const report = await agents.trustAuditor.generateTransparencyReport(
+            input.campaignId,
+            mockDeals
+          );
+          
+          return { success: true, report };
+        } catch (error) {
+          logError(error, { operation: 'generateTransparencyReport', input });
+          throw toTRPCError(error);
+        }
+      }),
+  }),
   
   auth: router({
     /**
@@ -646,7 +893,7 @@ export const appRouter = router({
           contributionId: z.string(),
           proof: z.string(),
           type: z.enum(['github', 'gitlab', 'direct']),
-          metadata: z.record(z.any()).optional(),
+          metadata: z.record(z.string(), z.any()).optional(),
           timestamp: z.number().optional()
         }))
         .mutation(async ({ input }) => {
@@ -678,7 +925,7 @@ export const appRouter = router({
             contributionId: z.string(),
             proof: z.string(),
             type: z.enum(['github', 'gitlab', 'direct']),
-            metadata: z.record(z.any()).optional(),
+            metadata: z.record(z.string(), z.any()).optional(),
             timestamp: z.number().optional()
           }))
         }))
@@ -786,7 +1033,7 @@ export const appRouter = router({
             timestamp: z.number(),
             age: z.number()
           })),
-          algorithmWeights: z.record(z.number()).optional(),
+          algorithmWeights: z.record(z.string(), z.number()).optional(),
           timeDecayFactor: z.number().optional(),
           userId: z.string()
         }))
@@ -1226,6 +1473,746 @@ export const appRouter = router({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Failed to create agent Community Note',
           });
+        }
+      }),
+  }),
+
+  // Social Credit Marketplace Agent Layer
+  agents: router({
+    /**
+     * Find influencers using Trust Navigator Agent
+     */
+    findInfluencers: publicProcedure
+      .input(z.object({
+        query: z.union([z.string(), z.object({
+          targetAudience: z.string(),
+          minReputation: z.number().optional(),
+          maxSybilRisk: z.number().optional(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+          budget: z.number().optional(),
+          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']).optional(),
+        })]),
+        limit: z.number().min(1).max(50).default(10),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const matches = await agents.trustNavigator.findInfluencers(input.query, input.limit);
+          return { success: true, matches };
+        } catch (error) {
+          logError(error, { operation: 'findInfluencers', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Detect Sybil clusters
+     */
+    detectSybilClusters: publicProcedure
+      .input(z.object({
+        accountIds: z.array(z.string()).optional(),
+        analysisDepth: z.number().min(1).max(5).default(3),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
+          
+          // Mock graph data for demo
+          const graphData = (input.accountIds || []).map(id => ({
+            accountId: id,
+            reputation: 100,
+            contributions: [{ timestamp: Date.now(), block: 1 }],
+            connections: [],
+          }));
+          
+          const clusters = await agents.sybilDetective.detectSybilClusters(graphData);
+          return { success: true, clusters };
+        } catch (error) {
+          logError(error, { operation: 'detectSybilClusters', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Negotiate endorsement deal
+     */
+    negotiateDeal: publicProcedure
+      .input(z.object({
+        influencerDid: z.string(),
+        brandDid: z.string(),
+        campaignRequirements: z.object({
+          targetAudience: z.string(),
+          minReputation: z.number().optional(),
+          maxSybilRisk: z.number().optional(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+          budget: z.number().optional(),
+          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']),
+        }),
+        initialTerms: z.object({
+          paymentAmount: z.number().optional(),
+          paymentToken: z.string().optional(),
+        }).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const deal = await agents.contractNegotiator.negotiateDeal(
+            input.influencerDid,
+            input.brandDid,
+            input.initialTerms || {},
+            input.campaignRequirements
+          );
+          
+          return { success: true, deal };
+        } catch (error) {
+          logError(error, { operation: 'negotiateDeal', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Setup x402 payment for deal
+     */
+    setupX402Payment: publicProcedure
+      .input(z.object({
+        dealId: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          // Get deal (would fetch from database in production)
+          const mockDeal = {
+            dealId: input.dealId,
+            influencerDid: 'did:influencer:1',
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'pending' as const,
+          };
+          
+          const x402Setup = await agents.contractNegotiator.setupX402Payment(mockDeal);
+          return { success: true, ...x402Setup };
+        } catch (error) {
+          logError(error, { operation: 'setupX402Payment', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Optimize campaign performance
+     */
+    optimizeCampaign: publicProcedure
+      .input(z.object({
+        campaignId: z.string(),
+        dealIds: z.array(z.string()),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
+          
+          // Get deals (would fetch from database in production)
+          const mockDeals = input.dealIds.map(id => ({
+            dealId: id,
+            influencerDid: `did:influencer:${id}`,
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'active' as const,
+          }));
+          
+          const optimization = await agents.campaignOptimizer.optimizeCampaign(
+            input.campaignId,
+            mockDeals
+          );
+          
+          return { success: true, optimization };
+        } catch (error) {
+          logError(error, { operation: 'optimizeCampaign', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Verify reputation
+     */
+    verifyReputation: publicProcedure
+      .input(z.object({
+        did: z.string(),
+        includeHistory: z.boolean().default(false),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          const verification = await agents.trustAuditor.verifyReputation(
+            input.did,
+            input.includeHistory
+          );
+          
+          return { success: true, verification };
+        } catch (error) {
+          logError(error, { operation: 'verifyReputation', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Generate transparency report
+     */
+    generateTransparencyReport: publicProcedure
+      .input(z.object({
+        campaignId: z.string(),
+        dealIds: z.array(z.string()),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
+          
+          // Get deals (would fetch from database in production)
+          const mockDeals = input.dealIds.map(id => ({
+            dealId: id,
+            influencerDid: `did:influencer:${id}`,
+            brandDid: 'did:brand:1',
+            terms: {
+              paymentAmount: 100,
+              paymentToken: 'DOT',
+              deliverables: [],
+              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
+            },
+            status: 'active' as const,
+            receiptUAL: `ual:receipt:${id}`,
+          }));
+          
+          const report = await agents.trustAuditor.generateTransparencyReport(
+            input.campaignId,
+            mockDeals
+          );
+          
+          return { success: true, report };
+        } catch (error) {
+          logError(error, { operation: 'generateTransparencyReport', input });
+          throw toTRPCError(error);
+        }
+      }),
+  }),
+
+  trust: router({
+    /**
+     * Stake tokens for trust layer
+     */
+    stake: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+        amount: z.string(), // BigInt as string
+        targetTier: z.enum(['BASIC', 'VERIFIED', 'PREMIUM', 'ELITE']).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getStakingSystem } = await import('./_core/trustLayer/stakingSystem');
+          const staking = getStakingSystem();
+          
+          const amount = BigInt(input.amount);
+          const result = await staking.stake(input.userDID, amount, input.targetTier);
+          
+          return { success: true, ...result };
+        } catch (error) {
+          logError(error, { operation: 'stake', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Unstake tokens
+     */
+    unstake: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+        amount: z.string(), // BigInt as string
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getStakingSystem } = await import('./_core/trustLayer/stakingSystem');
+          const staking = getStakingSystem();
+          
+          const amount = BigInt(input.amount);
+          const result = await staking.unstake(input.userDID, amount);
+          
+          return { success: true, ...result };
+        } catch (error) {
+          logError(error, { operation: 'unstake', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Get user stake information
+     */
+    getStake: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getStakingSystem } = await import('./_core/trustLayer/stakingSystem');
+          const staking = getStakingSystem();
+          
+          const stake = staking.getUserStake(input.userDID);
+          
+          return {
+            success: true,
+            stake: stake ? {
+              totalStaked: stake.totalStaked.toString(),
+              lockedUntil: stake.lockedUntil,
+              reputationMultiplier: stake.reputationMultiplier,
+              slashableAmount: stake.slashableAmount.toString(),
+              tier: stake.tier,
+              createdAt: stake.createdAt,
+              lastUpdated: stake.lastUpdated,
+            } : null
+          };
+        } catch (error) {
+          logError(error, { operation: 'getStake', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Execute slash on user stake
+     */
+    slash: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+        conditionType: z.string(),
+        evidence: z.array(z.string()),
+        isArbitrator: z.boolean().default(false),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getStakingSystem } = await import('./_core/trustLayer/stakingSystem');
+          const staking = getStakingSystem();
+          
+          const result = await staking.executeSlash(
+            input.userDID,
+            input.conditionType,
+            input.evidence,
+            input.isArbitrator
+          );
+          
+          return {
+            success: true,
+            slashedAmount: result.slashedAmount.toString(),
+            remainingStake: result.remainingStake.toString(),
+          };
+        } catch (error) {
+          logError(error, { operation: 'slash', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Create payment request
+     */
+    createPayment: publicProcedure
+      .input(z.object({
+        from: z.string(),
+        to: z.string(),
+        amount: z.number(),
+        resource: z.string(),
+        conditions: z.object({
+          maxResults: z.number().optional(),
+          qualityThreshold: z.number().optional(),
+          expiry: z.number().optional(),
+          verification: z.string().optional(),
+          releaseConditions: z.string().optional(),
+          disputePeriod: z.number().optional(),
+          performanceThreshold: z.number().optional(),
+        }).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getX402PaymentHandler } = await import('./_core/trustLayer/x402PaymentHandler');
+          const payments = getX402PaymentHandler();
+          
+          const payment = await payments.createPaymentRequest({
+            from: input.from,
+            to: input.to,
+            amount: input.amount,
+            resource: input.resource,
+            conditions: input.conditions,
+          });
+          
+          return { success: true, payment };
+        } catch (error) {
+          logError(error, { operation: 'createPayment', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Complete payment
+     */
+    completePayment: publicProcedure
+      .input(z.object({
+        paymentId: z.string(),
+        verificationProof: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getX402PaymentHandler } = await import('./_core/trustLayer/x402PaymentHandler');
+          const payments = getX402PaymentHandler();
+          
+          const success = await payments.completePayment(input.paymentId, input.verificationProof);
+          
+          return { success };
+        } catch (error) {
+          logError(error, { operation: 'completePayment', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Get payment statistics
+     */
+    getPaymentStats: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getX402PaymentHandler } = await import('./_core/trustLayer/x402PaymentHandler');
+          const payments = getX402PaymentHandler();
+          
+          const stats = payments.getPaymentStatistics(input.userDID);
+          
+          return { success: true, stats };
+        } catch (error) {
+          logError(error, { operation: 'getPaymentStats', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Create escrow deal
+     */
+    createEscrow: publicProcedure
+      .input(z.object({
+        brand: z.string(),
+        influencer: z.string(),
+        totalAmount: z.string(), // BigInt as string
+        performanceThreshold: z.number(),
+        verificationHash: z.string(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getTrustEscrow } = await import('./_core/trustLayer/trustEscrow');
+          const escrow = getTrustEscrow();
+          
+          const amount = BigInt(input.totalAmount);
+          const deal = await escrow.createEscrow(
+            input.brand,
+            input.influencer,
+            amount,
+            input.performanceThreshold,
+            input.verificationHash,
+            input.metadata
+          );
+          
+          return {
+            success: true,
+            deal: {
+              ...deal,
+              totalAmount: deal.totalAmount.toString(),
+              releasedAmount: deal.releasedAmount.toString(),
+            }
+          };
+        } catch (error) {
+          logError(error, { operation: 'createEscrow', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Release escrow payment
+     */
+    releaseEscrow: publicProcedure
+      .input(z.object({
+        dealId: z.string(),
+        performanceProof: z.object({
+          engagementRate: z.number(),
+          conversions: z.number(),
+          qualityRating: z.number(),
+          verifiedAt: z.number(),
+          verifier: z.string(),
+        }),
+        releaseAmount: z.string(), // BigInt as string
+        isVerifier: z.boolean().default(false),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getTrustEscrow } = await import('./_core/trustLayer/trustEscrow');
+          const escrow = getTrustEscrow();
+          
+          const releaseAmount = BigInt(input.releaseAmount);
+          const result = await escrow.releasePayment(
+            input.dealId,
+            input.performanceProof,
+            releaseAmount,
+            input.isVerifier
+          );
+          
+          return {
+            success: true,
+            releasedAmount: result.releasedAmount.toString(),
+            remainingAmount: result.remainingAmount.toString(),
+          };
+        } catch (error) {
+          logError(error, { operation: 'releaseEscrow', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Get trust report
+     */
+    getTrustReport: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getTrustAnalytics } = await import('./_core/trustLayer/trustAnalytics');
+          const analytics = getTrustAnalytics();
+          
+          const report = await analytics.generateTrustReport(input.userDID);
+          
+          return {
+            success: true,
+            report: {
+              ...report,
+              economicTrust: {
+                ...report.economicTrust,
+                totalStaked: report.economicTrust.totalStaked.toString(),
+                slashableAmount: report.economicTrust.slashableAmount.toString(),
+              }
+            }
+          };
+        } catch (error) {
+          logError(error, { operation: 'getTrustReport', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Calculate trust score
+     */
+    getTrustScore: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getTrustAnalytics } = await import('./_core/trustLayer/trustAnalytics');
+          const analytics = getTrustAnalytics();
+          
+          const score = await analytics.calculateTrustScore(input.userDID);
+          
+          return { success: true, score };
+        } catch (error) {
+          logError(error, { operation: 'getTrustScore', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Execute trusted campaign
+     */
+    executeCampaign: publicProcedure
+      .input(z.object({
+        campaignUAL: z.object({
+          id: z.string(),
+          details: z.object({
+            budget: z.number(),
+            title: z.string(),
+            description: z.string(),
+          }),
+          participationRequirements: z.object({
+            minReputationScore: z.number(),
+            maxSybilRisk: z.number(),
+            minStakeTier: z.enum(['BASIC', 'VERIFIED', 'PREMIUM', 'ELITE']).optional(),
+          }),
+          creator: z.string(),
+        }),
+        brandDID: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getTrustOrchestrator } = await import('./_core/trustLayer/trustOrchestrator');
+          const orchestrator = getTrustOrchestrator();
+          
+          const result = await orchestrator.executeTrustedCampaign(
+            input.campaignUAL,
+            input.brandDID
+          );
+          
+          return { success: true, result };
+        } catch (error) {
+          logError(error, { operation: 'executeCampaign', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Get trust-enhanced influencer recommendations
+     */
+    getTrustEnhancedRecommendations: publicProcedure
+      .input(z.object({
+        brandDID: z.string(),
+        requirements: z.object({
+          targetAudience: z.string(),
+          minReputation: z.number().optional(),
+          maxSybilRisk: z.number().optional(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+          budget: z.number().optional(),
+          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']),
+          minTrustScore: z.number().optional(),
+          minStakeTier: z.enum(['BASIC', 'VERIFIED', 'PREMIUM', 'ELITE']).optional(),
+          maxDisputeRate: z.number().optional(),
+        }),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getTrustLayerAgentIntegration } = await import('./_core/trustLayer/agentIntegration');
+          const integration = getTrustLayerAgentIntegration();
+          
+          const result = await integration.getTrustEnhancedRecommendations(
+            input.brandDID,
+            input.requirements
+          );
+          
+          return { success: true, ...result };
+        } catch (error) {
+          logError(error, { operation: 'getTrustEnhancedRecommendations', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Verify brand for campaign execution
+     */
+    verifyBrandForCampaign: publicProcedure
+      .input(z.object({
+        brandDID: z.string(),
+        campaignBudget: z.number(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getTrustLayerAgentIntegration } = await import('./_core/trustLayer/agentIntegration');
+          const integration = getTrustLayerAgentIntegration();
+          
+          const result = await integration.verifyBrandForCampaign(
+            input.brandDID,
+            input.campaignBudget
+          );
+          
+          return {
+            success: true,
+            ...result,
+            missingStake: result.missingStake?.toString()
+          };
+        } catch (error) {
+          logError(error, { operation: 'verifyBrandForCampaign', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Setup escrow for influencer deal
+     */
+    setupInfluencerEscrow: publicProcedure
+      .input(z.object({
+        brandDID: z.string(),
+        influencerDID: z.string(),
+        paymentAmount: z.number(),
+        performanceThreshold: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { getTrustLayerAgentIntegration } = await import('./_core/trustLayer/agentIntegration');
+          const integration = getTrustLayerAgentIntegration();
+          
+          const result = await integration.setupInfluencerEscrow(
+            input.brandDID,
+            input.influencerDID,
+            input.paymentAmount,
+            input.performanceThreshold
+          );
+          
+          return { success: true, ...result };
+        } catch (error) {
+          logError(error, { operation: 'setupInfluencerEscrow', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Enhance influencer with trust data
+     */
+    enhanceInfluencerWithTrust: publicProcedure
+      .input(z.object({
+        influencer: z.object({
+          did: z.string(),
+          reputation: z.number(),
+          socialRank: z.number(),
+          economicStake: z.number(),
+          sybilRisk: z.number(),
+          platforms: z.array(z.string()).optional(),
+          specialties: z.array(z.string()).optional(),
+        }),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { getTrustLayerAgentIntegration } = await import('./_core/trustLayer/agentIntegration');
+          const integration = getTrustLayerAgentIntegration();
+          
+          const enhanced = await integration.enhanceInfluencerWithTrust(input.influencer);
+          
+          return {
+            success: true,
+            influencer: {
+              ...enhanced,
+              totalStaked: enhanced.totalStaked.toString()
+            }
+          };
+        } catch (error) {
+          logError(error, { operation: 'enhanceInfluencerWithTrust', input });
+          throw toTRPCError(error);
         }
       }),
   }),

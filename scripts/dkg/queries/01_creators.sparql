@@ -1,0 +1,32 @@
+# Query: Fetch Creator static info (profile id, platform, userId, name, image)
+# Purpose: Get all creator nodes from the DKG for reputation computation
+
+PREFIX schema: <https://schema.org/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+
+SELECT ?creator ?platform ?creatorId ?userId ?name ?image WHERE {
+  ?creator a schema:Person, foaf:Person, prov:Agent .
+  ?creator schema:identifier ?idObj .
+  ?idObj schema:propertyID ?propID ;
+         schema:value ?propVal .
+  BIND(CONCAT(STR(?propID),":",STR(?propVal)) AS ?idPair)
+  OPTIONAL { ?creator schema:identifier ?platObj .
+             ?platObj schema:propertyID "platform" ;
+                      schema:value ?platform . }
+  OPTIONAL {
+    ?creator schema:identifier ?creatorIdent .
+    ?creatorIdent schema:propertyID "creatorId" ;
+                  schema:value ?creatorId .
+  }
+  OPTIONAL {
+    ?creator schema:identifier ?userIdent .
+    ?userIdent schema:propertyID "userId" ;
+               schema:value ?userId .
+  }
+  OPTIONAL { ?creator foaf:name ?name . }
+  OPTIONAL { ?creator schema:image ?imgObj .
+             ?imgObj schema:url ?image . }
+}
+LIMIT 1000
+

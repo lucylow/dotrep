@@ -35,6 +35,7 @@ import {
   type DIDKeyPair,
   type SignatureResult,
 } from './did-signing';
+import { TokenomicsService, createTokenomicsService, type PublishCostEstimate } from './tokenomics-service';
 
 export interface DKGConfig {
   endpoint?: string;
@@ -80,6 +81,11 @@ export interface PublishResult {
   UAL: string;
   transactionHash?: string;
   blockNumber?: number;
+  costEstimate?: PublishCostEstimate; // Cost estimate for this publish operation
+  actualCost?: {
+    tracFee: bigint;
+    neuroGasFee: bigint;
+  }; // Actual costs (if tracked)
 }
 
 /**
@@ -93,12 +99,20 @@ export class DKGClientV8 {
   private maxRetries: number;
   private retryDelay: number;
   private publisherKeyPair: DIDKeyPair | null = null;
+  private tokenomics: TokenomicsService;
 
   constructor(config?: DKGConfig) {
     this.config = this.resolveConfig(config);
     this.maxRetries = config?.maxRetries || 3;
     this.retryDelay = config?.retryDelay || 1000;
     this.useMockMode = config?.useMockMode || process.env.DKG_USE_MOCK === 'true' || false;
+    
+    // Initialize tokenomics service
+    this.tokenomics = createTokenomicsService({
+      simulationMode: this.useMockMode || process.env.DKG_SIMULATION_MODE === 'true',
+      tracPriceUSD: parseFloat(process.env.TRAC_PRICE_USD || '0'),
+      neuroPriceUSD: parseFloat(process.env.NEURO_PRICE_USD || '0'),
+    });
     
     // Initialize publisher key pair for signing
     if (config?.publisherKeyPair) {
@@ -125,15 +139,17 @@ export class DKGClientV8 {
    * Resolve DKG configuration based on environment (V8 compatible)
    */
   private resolveConfig(config?: DKGConfig): DKGConfig {
-    const environment = config?.environment || process.env.DKG_ENVIRONMENT || 'testnet';
+    const env = config?.environment || process.env.DKG_ENVIRONMENT || 'testnet';
+    const environment: 'testnet' | 'mainnet' | 'local' = 
+      (env === 'testnet' || env === 'mainnet' || env === 'local') ? env : 'testnet';
     
-    const endpoints = {
+    const endpoints: Record<'testnet' | 'mainnet' | 'local', string> = {
       testnet: 'https://v6-pegasus-node-02.origin-trail.network:8900',
       mainnet: 'https://positron.origin-trail.network',
       local: 'http://localhost:8900'
     };
 
-    const blockchains = {
+    const blockchains: Record<'testnet' | 'mainnet' | 'local', string> = {
       testnet: 'otp:20430',
       mainnet: 'otp:2043',
       local: 'hardhat1:31337'
@@ -259,10 +275,18 @@ export class DKGClientV8 {
       console.log(`✅ [MOCK] Reputation asset published successfully!`);
       console.log(`🔗 UAL: ${ual}`);
       
+      // Estimate cost even in mock mode (for simulation)
+      const costEstimate = this.tokenomics.estimatePublishCost(epochs, false);
+      
       return {
         UAL: ual,
         transactionHash: `0x${Buffer.from(`${Date.now()}-${Math.random()}`).toString('hex')}`,
         blockNumber: Math.floor(Date.now() / 1000),
+        costEstimate,
+        actualCost: {
+          tracFee: costEstimate.tracFee,
+          neuroGasFee: costEstimate.neuroGasFee
+        }
       };
     }
 
@@ -307,6 +331,13 @@ export class DKGClientV8 {
       console.log(`📊 Reputation score: ${reputationData.reputationScore}`);
       console.log(`📝 Contributions: ${reputationData.contributions.length}`);
 
+      // Estimate cost before publishing
+      const costEstimate = this.tokenomics.estimatePublishCost(epochs, false);
+      console.log(`💰 Estimated cost: ${this.tokenomics.formatTRAC(costEstimate.tracFee)} + ${this.tokenomics.formatNEURO(costEstimate.neuroGasFee)}`);
+      if (costEstimate.totalCostUSD > 0) {
+        console.log(`   Total: $${costEstimate.totalCostUSD.toFixed(4)} USD`);
+      }
+
       // Publish to DKG (V8 API)
       const result = await this.dkg.asset.create(
         {
@@ -323,10 +354,19 @@ export class DKGClientV8 {
         console.log(`📝 Transaction: ${result.transactionHash}`);
       }
 
+      // Record actual fees (in real implementation, extract from transaction receipt)
+      // For now, use estimated fees
+      this.tokenomics.recordFeeSpent('publish', costEstimate.tracFee, costEstimate.neuroGasFee, result.UAL);
+
       return {
         UAL: result.UAL,
         transactionHash: result.transactionHash,
-        blockNumber: result.blockNumber
+        blockNumber: result.blockNumber,
+        costEstimate,
+        actualCost: {
+          tracFee: costEstimate.tracFee,
+          neuroGasFee: costEstimate.neuroGasFee
+        }
       };
     }, 'Publish reputation asset').catch((error) => {
       // Fallback to mock if enabled
@@ -544,31 +584,120 @@ export class DKGClientV8 {
   }
 
   /**
-   * Batch publish multiple reputation assets
+   * Batch publish multiple reputation assets with cost optimization
+   * 
+   * Uses batching to reduce gas costs and provides cost estimates
    * 
    * @param reputationDataArray - Array of reputation data to publish
    * @param epochs - Number of epochs to store each asset
-   * @returns Array of publish results
+   * @param options - Batch options
+   * @param options.batchSize - Size of each batch (default: optimal from tokenomics)
+   * @param options.delayBetweenBatches - Delay between batches in ms (default: 1000)
+   * @returns Array of publish results with cost information
    */
   async batchPublishReputationAssets(
     reputationDataArray: ReputationAsset[],
-    epochs: number = 2
-  ): Promise<PublishResult[]> {
+    epochs: number = 2,
+    options: {
+      batchSize?: number;
+      delayBetweenBatches?: number;
+    } = {}
+  ): Promise<{
+    results: PublishResult[];
+    batchCostEstimate: import('./tokenomics-service').BatchPublishCostEstimate;
+    summary: {
+      totalPublished: number;
+      totalFailed: number;
+      totalTracSpent: bigint;
+      totalNeuroSpent: bigint;
+      totalCostUSD: number;
+    };
+  }> {
+    const batchSize = options.batchSize || this.tokenomics.getOptimalBatchSize();
+    const delay = options.delayBetweenBatches || this.tokenomics.getConfig().batchDelay;
+    
     console.log(`📦 Batch publishing ${reputationDataArray.length} reputation assets`);
+    console.log(`   Batch size: ${batchSize}, Delay: ${delay}ms`);
+    
+    // Get batch cost estimate
+    const batchCostEstimate = this.tokenomics.estimateBatchPublishCost(
+      reputationDataArray.length,
+      epochs,
+      false
+    );
+    console.log(`💰 Batch cost estimate:`);
+    console.log(`   Total TRAC: ${this.tokenomics.formatTRAC(batchCostEstimate.totalTracFee)}`);
+    console.log(`   Total NEURO: ${this.tokenomics.formatNEURO(batchCostEstimate.totalNeuroGasFee)}`);
+    if (batchCostEstimate.totalCostUSD > 0) {
+      console.log(`   Total USD: $${batchCostEstimate.totalCostUSD.toFixed(4)}`);
+    }
+    if (batchCostEstimate.savingsFromBatching.percentage > 0) {
+      console.log(`   💡 Batching saves ${batchCostEstimate.savingsFromBatching.percentage.toFixed(1)}% on gas fees`);
+    }
     
     const results: PublishResult[] = [];
-    for (const reputationData of reputationDataArray) {
-      try {
-        const result = await this.publishReputationAsset(reputationData, epochs);
-        results.push(result);
-      } catch (error: any) {
-        console.error(`❌ Failed to publish asset for ${reputationData.developerId}:`, error.message);
-        // Continue with other assets
+    let totalTracSpent = BigInt(0);
+    let totalNeuroSpent = BigInt(0);
+    
+    // Process in batches
+    for (let i = 0; i < reputationDataArray.length; i += batchSize) {
+      const batch = reputationDataArray.slice(i, i + batchSize);
+      console.log(`\n📦 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(reputationDataArray.length / batchSize)} (${batch.length} assets)`);
+      
+      for (const reputationData of batch) {
+        try {
+          const result = await this.publishReputationAsset(reputationData, epochs);
+          results.push(result);
+          
+          if (result.actualCost) {
+            totalTracSpent += result.actualCost.tracFee;
+            totalNeuroSpent += result.actualCost.neuroGasFee;
+          }
+        } catch (error: any) {
+          console.error(`❌ Failed to publish asset for ${reputationData.developerId}:`, error.message);
+          results.push({
+            UAL: '',
+            error: error.message
+          } as any);
+        }
+      }
+      
+      // Delay between batches (except for last batch)
+      if (i + batchSize < reputationDataArray.length && delay > 0) {
+        console.log(`⏳ Waiting ${delay}ms before next batch...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
     
-    console.log(`✅ Batch publish complete: ${results.length}/${reputationDataArray.length} successful`);
-    return results;
+    const successful = results.filter(r => r.UAL && !('error' in r)).length;
+    const failed = results.length - successful;
+    
+    // Record batch fees
+    this.tokenomics.recordFeeSpent('batch', totalTracSpent, totalNeuroSpent, undefined, successful);
+    
+    const totalCostUSD = (this.tokenomics.getConfig().tracPriceUSD > 0
+      ? Number(totalTracSpent) / (10 ** this.tokenomics.getConfig().tracDecimals) * this.tokenomics.getConfig().tracPriceUSD
+      : 0) + (this.tokenomics.getConfig().neuroPriceUSD > 0
+      ? Number(totalNeuroSpent) / (10 ** this.tokenomics.getConfig().neuroDecimals) * this.tokenomics.getConfig().neuroPriceUSD
+      : 0);
+    
+    console.log(`\n✅ Batch publish complete: ${successful} succeeded, ${failed} failed`);
+    console.log(`💰 Total spent: ${this.tokenomics.formatTRAC(totalTracSpent)} + ${this.tokenomics.formatNEURO(totalNeuroSpent)}`);
+    if (totalCostUSD > 0) {
+      console.log(`   Total USD: $${totalCostUSD.toFixed(4)}`);
+    }
+    
+    return {
+      results,
+      batchCostEstimate,
+      summary: {
+        totalPublished: successful,
+        totalFailed: failed,
+        totalTracSpent,
+        totalNeuroSpent,
+        totalCostUSD
+      }
+    };
   }
 
   /**
@@ -788,6 +917,20 @@ export class DKGClientV8 {
       endpoint: this.config.endpoint || 'unknown',
       mockMode: this.useMockMode
     };
+  }
+
+  /**
+   * Get tokenomics service instance
+   */
+  getTokenomicsService(): TokenomicsService {
+    return this.tokenomics;
+  }
+
+  /**
+   * Get fee statistics
+   */
+  getFeeStatistics() {
+    return this.tokenomics.getFeeStatistics();
   }
 }
 

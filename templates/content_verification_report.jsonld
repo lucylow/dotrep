@@ -1,0 +1,40 @@
+{
+  "@context": [
+    "https://schema.org/",
+    "https://trust-marketplace.org/schema/v1",
+    {
+      "guardian": "https://guardian.umanitek.ai/schema/",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "@type": "guardian:ContentVerificationReport",
+  "@id": "ual:dkg:verification-report:{{reportId}}",
+  "schema:dateCreated": "{{dateCreated}}",
+  "schema:about": "{{contentUrl}}",
+  "guardian:generatedBy": {
+    "@id": "did:dkg:umanitek-guardian",
+    "@type": "guardian:GuardianAgent",
+    "schema:name": "Umanitek Guardian AI Agent"
+  },
+  "guardian:verificationResult": {
+    "@type": "guardian:VerificationResult",
+    "guardian:confidence": {{confidence}},
+    "guardian:matchFound": {{matchFound}},
+    "guardian:matchType": "{{matchType}}",
+    "guardian:originalFingerprint": {
+      "@type": "guardian:ContentFingerprint",
+      "guardian:hash": "{{fingerprintHash}}",
+      "guardian:algorithm": "videntifier"
+    },
+    "guardian:recommendedAction": "{{recommendedAction}}",
+    "guardian:processingTime": {{processingTime}}
+  },
+  "guardian:matches": {{matches}},
+  "guardian:wasDerivedFrom": [
+    {
+      "@id": "ual:dkg:videntifier-db:latest"
+    }
+  ],
+  "prov:wasAssociatedWith": "did:dkg:umanitek-guardian"
+}
+

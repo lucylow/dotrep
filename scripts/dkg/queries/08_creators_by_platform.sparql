@@ -1,0 +1,15 @@
+# Query: Count creators by platform (small breakdown)
+# Purpose: Understand platform distribution in the dataset
+
+PREFIX schema: <https://schema.org/>
+
+SELECT ?platform (COUNT(DISTINCT ?creator) AS ?count)
+WHERE {
+  ?creator a schema:Person .
+  ?creator schema:identifier ?idObj .
+  ?idObj schema:propertyID "platform" ;
+         schema:value ?platform .
+}
+GROUP BY ?platform
+ORDER BY DESC(?count)
+

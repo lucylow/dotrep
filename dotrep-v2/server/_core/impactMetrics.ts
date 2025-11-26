@@ -103,6 +103,23 @@ export interface EcosystemUsabilityMetrics {
   timestamp: number;
 }
 
+export interface GuardianMetrics {
+  totalVerifications: number;
+  flaggedContent: number;
+  cleanContent: number;
+  flagsByType: {
+    deepfake: number;
+    csam: number;
+    illicit: number;
+    misinformation: number;
+  };
+  averageConfidence: number;
+  takedownsExecuted: number;
+  slashesExecuted: number;
+  totalSlashedAmount: number; // In TRAC
+  timestamp: number;
+}
+
 export interface ImpactMetrics {
   accuracy: AccuracyMetrics;
   citations: CitationMetrics;
@@ -113,6 +130,7 @@ export interface ImpactMetrics {
   governance: GovernanceMetrics;
   identityVerification: IdentityVerificationMetrics;
   ecosystemUsability: EcosystemUsabilityMetrics;
+  guardian: GuardianMetrics;
   lastUpdated: number;
 }
 
@@ -211,6 +229,22 @@ export class ImpactMetricsService {
         onboardingSuccessRate: 0,
         developerSatisfaction: 0,
         apiLatency: 0,
+        timestamp: now,
+      },
+      guardian: {
+        totalVerifications: 0,
+        flaggedContent: 0,
+        cleanContent: 0,
+        flagsByType: {
+          deepfake: 0,
+          csam: 0,
+          illicit: 0,
+          misinformation: 0,
+        },
+        averageConfidence: 0,
+        takedownsExecuted: 0,
+        slashesExecuted: 0,
+        totalSlashedAmount: 0,
         timestamp: now,
       },
       lastUpdated: now,
@@ -389,6 +423,63 @@ export class ImpactMetricsService {
     }
     
     this.metrics.communityNotes.timestamp = Date.now();
+    this.saveSnapshot();
+  }
+
+  /**
+   * Record Guardian flag
+   */
+  recordGuardianFlag(
+    matchType: 'deepfake' | 'csam' | 'illicit' | 'misinformation',
+    confidence: number
+  ): void {
+    this.metrics.guardian.totalVerifications++;
+    this.metrics.guardian.flaggedContent++;
+    this.metrics.guardian.flagsByType[matchType]++;
+
+    // Update average confidence
+    const currentTotal = this.metrics.guardian.averageConfidence * 
+                        (this.metrics.guardian.totalVerifications - 1);
+    this.metrics.guardian.averageConfidence = 
+      (currentTotal + confidence) / this.metrics.guardian.totalVerifications;
+
+    this.metrics.guardian.timestamp = Date.now();
+    this.saveSnapshot();
+  }
+
+  /**
+   * Record Guardian clean verification
+   */
+  recordGuardianClean(confidence: number): void {
+    this.metrics.guardian.totalVerifications++;
+    this.metrics.guardian.cleanContent++;
+
+    // Update average confidence
+    const currentTotal = this.metrics.guardian.averageConfidence * 
+                        (this.metrics.guardian.totalVerifications - 1);
+    this.metrics.guardian.averageConfidence = 
+      (currentTotal + confidence) / this.metrics.guardian.totalVerifications;
+
+    this.metrics.guardian.timestamp = Date.now();
+    this.saveSnapshot();
+  }
+
+  /**
+   * Record Guardian slashing
+   */
+  recordGuardianSlash(amount: number): void {
+    this.metrics.guardian.slashesExecuted++;
+    this.metrics.guardian.totalSlashedAmount += amount;
+    this.metrics.guardian.timestamp = Date.now();
+    this.saveSnapshot();
+  }
+
+  /**
+   * Record Guardian takedown
+   */
+  recordGuardianTakedown(): void {
+    this.metrics.guardian.takedownsExecuted++;
+    this.metrics.guardian.timestamp = Date.now();
     this.saveSnapshot();
   }
 

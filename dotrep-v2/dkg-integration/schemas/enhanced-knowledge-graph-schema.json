@@ -1,0 +1,361 @@
+{
+  "@context": {
+    "@vocab": "https://schema.org/",
+    "dotrep": "https://dotrep.io/ontology/",
+    "polkadot": "https://polkadot.network/ontology/",
+    "neuroweb": "https://neuroweb.origintrail.io/ontology/",
+    "dkg": "https://dkg.origintrail.io/ontology/",
+    "vc": "https://www.w3.org/2018/credentials/v1#",
+    "did": "https://www.w3.org/ns/did/v1#"
+  },
+  "@type": "KnowledgeGraphSchema",
+  "version": "2.0.0",
+  "description": "Enhanced Knowledge Graph Schema with Polkadot and DKG Integration",
+  
+  "coreEntities": {
+    "Developer": {
+      "@type": "Person",
+      "requiredProperties": [
+        "identifier",
+        "dotrep:polkadotAddress",
+        "dotrep:reputationScore"
+      ],
+      "properties": {
+        "@id": {
+          "type": "string",
+          "format": "did:polkadot:{address}",
+          "description": "Decentralized Identifier (DID)"
+        },
+        "identifier": {
+          "type": "string",
+          "description": "Unique developer identifier"
+        },
+        "dotrep:polkadotAddress": {
+          "type": "string",
+          "format": "SS58",
+          "description": "Polkadot account address"
+        },
+        "dotrep:reputationScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Computed reputation score"
+        },
+        "dotrep:crossChainReputation": {
+          "type": "object",
+          "properties": {
+            "chains": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chainId": "string",
+                  "reputationScore": "number",
+                  "confidence": "number",
+                  "lastUpdated": "string"
+                }
+              }
+            },
+            "aggregatedScore": "number",
+            "aggregatedConfidence": "number"
+          }
+        },
+        "polkadot:humanVerification": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["verified", "pending", "failed"]
+            },
+            "confidence": "number",
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["biometric", "social_graph", "behavioral", "economic"]
+              }
+            },
+            "verifiedAt": "string",
+            "vc": {
+              "@type": "VerifiableCredential",
+              "description": "Proof of Personhood credential"
+            }
+          }
+        },
+        "polkadot:onChainStake": {
+          "type": "object",
+          "properties": {
+            "amount": "string",
+            "currency": "string",
+            "lockPeriod": "number",
+            "chain": "string",
+            "blockHash": "string"
+          }
+        },
+        "neuroweb:knowledgeAssetUAL": {
+          "type": "string",
+          "format": "ual",
+          "description": "Uniform Asset Locator for reputation asset on NeuroWeb"
+        },
+        "neuroweb:anchoredAt": {
+          "type": "string",
+          "format": "blockHash",
+          "description": "Block hash where reputation was anchored"
+        },
+        "dotrep:sybilResistanceScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Sybil resistance metric"
+        }
+      }
+    },
+    
+    "Contribution": {
+      "@type": "CreativeWork",
+      "requiredProperties": ["name", "url", "dotrep:contributionType"],
+      "properties": {
+        "@id": "string",
+        "name": "string",
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "datePublished": "string",
+        "dotrep:contributionType": {
+          "type": "string",
+          "enum": ["github_pr", "github_commit", "gitlab_mr", "polkadot_proposal", "substrate_runtime", "other"]
+        },
+        "dotrep:impactScore": {
+          "type": "number",
+          "description": "Quantified impact of contribution"
+        },
+        "author": {
+          "@id": "did:polkadot:{address}",
+          "@type": "Person"
+        },
+        "dotrep:relatedContributions": {
+          "type": "array",
+          "items": "@id",
+          "description": "Related contributions in the knowledge graph"
+        },
+        "dotrep:technologies": {
+          "type": "array",
+          "items": "string",
+          "description": "Technologies used (e.g., 'Polkadot SDK', 'Substrate', 'Rust')"
+        }
+      }
+    },
+    
+    "SocialConnection": {
+      "@type": "dotrep:SocialConnection",
+      "requiredProperties": ["from", "to", "connectionType"],
+      "properties": {
+        "@id": "string",
+        "from": {
+          "@id": "did:polkadot:{address}",
+          "@type": "Person"
+        },
+        "to": {
+          "@id": "did:polkadot:{address}",
+          "@type": "Person"
+        },
+        "dotrep:connectionType": {
+          "type": "string",
+          "enum": ["collaborates_with", "mentors", "reviewed_by", "endorses", "follows", "contributed_with"]
+        },
+        "dotrep:connectionStrength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Strength of connection based on interactions"
+        },
+        "dotrep:verified": {
+          "type": "boolean",
+          "description": "Whether connection is verified on-chain"
+        },
+        "dotrep:evidenceUALs": {
+          "type": "array",
+          "items": "string",
+          "description": "UALs of Knowledge Assets that evidence this connection"
+        },
+        "createdAt": "string",
+        "lastVerifiedAt": "string"
+      }
+    },
+    
+    "ReputationNetwork": {
+      "@type": "dotrep:ReputationNetwork",
+      "requiredProperties": ["networkId", "participants"],
+      "properties": {
+        "@id": "string",
+        "dotrep:networkId": "string",
+        "dotrep:networkType": {
+          "type": "string",
+          "enum": ["open_source", "polkadot_ecosystem", "substrate_developers", "hackathon", "custom"]
+        },
+        "dotrep:participants": {
+          "type": "array",
+          "items": {
+            "@id": "did:polkadot:{address}"
+          }
+        },
+        "dotrep:networkMetrics": {
+          "type": "object",
+          "properties": {
+            "totalContributions": "number",
+            "totalReputation": "number",
+            "averageReputation": "number",
+            "networkDensity": "number",
+            "trustScore": "number"
+          }
+        },
+        "neuroweb:anchoredAt": "string",
+        "createdAt": "string"
+      }
+    },
+    
+    "CrossChainAttestation": {
+      "@type": "dotrep:CrossChainAttestation",
+      "requiredProperties": ["sourceChain", "targetChain", "attestationData"],
+      "properties": {
+        "@id": "string",
+        "dotrep:sourceChain": {
+          "type": "string",
+          "enum": ["polkadot", "kusama", "neuroweb", "acala", "moonbeam"]
+        },
+        "dotrep:targetChain": {
+          "type": "string"
+        },
+        "dotrep:xcmMessageId": "string",
+        "dotrep:attestationType": {
+          "type": "string",
+          "enum": ["reputation_sync", "identity_verification", "stake_transfer", "event_proof"]
+        },
+        "dotrep:attestationData": "object",
+        "polkadot:blockHash": "string",
+        "polkadot:extrinsicHash": "string",
+        "dotrep:verified": "boolean",
+        "createdAt": "string"
+      }
+    },
+    
+    "CommunityNote": {
+      "@type": "dotrep:CommunityNote",
+      "requiredProperties": ["noteId", "targetUAL", "content", "author"],
+      "properties": {
+        "@id": "string",
+        "dotrep:noteId": "string",
+        "dotrep:targetUAL": {
+          "type": "string",
+          "format": "ual",
+          "description": "UAL of the Knowledge Asset this note fact-checks"
+        },
+        "content": "string",
+        "dotrep:noteType": {
+          "type": "string",
+          "enum": ["fact_check", "correction", "context", "endorsement", "warning"]
+        },
+        "author": {
+          "@id": "did:polkadot:{address}",
+          "@type": "Person"
+        },
+        "dotrep:authorReputation": "number",
+        "dotrep:upvotes": "number",
+        "dotrep:downvotes": "number",
+        "dotrep:verified": "boolean",
+        "dotrep:verificationProofs": {
+          "type": "array",
+          "items": "object"
+        },
+        "neuroweb:anchoredAt": "string",
+        "createdAt": "string",
+        "updatedAt": "string"
+      }
+    },
+    
+    "KnowledgeGraphRelation": {
+      "@type": "dotrep:KnowledgeGraphRelation",
+      "description": "Semantic relationships between entities in the knowledge graph",
+      "relationTypes": {
+        "dotrep:collaboratesWith": "Person -> Person",
+        "dotrep:contributedTo": "Person -> Contribution",
+        "dotrep:reviewedBy": "Contribution -> Person",
+        "dotrep:partOfNetwork": "Person -> ReputationNetwork",
+        "dotrep:references": "CommunityNote -> KnowledgeAsset",
+        "dotrep:syncedAcrossChains": "Attestation -> Developer",
+        "dotrep:trusts": "Person -> Person",
+        "dotrep:endorses": "Person -> Person",
+        "dotrep:buildsOn": "Contribution -> Contribution",
+        "dotrep:verifies": "Person -> CommunityNote"
+      }
+    }
+  },
+  
+  "polkadotFeatures": {
+    "neurowebIntegration": {
+      "anchoring": {
+        "method": "on-chain",
+        "parachain": "neuroweb",
+        "assetTypes": ["reputation", "community_note", "cross_chain_attestation"]
+      },
+      "knowledgeAssets": {
+        "format": "JSON-LD",
+        "standard": "W3C",
+        "addressing": "UAL"
+      }
+    },
+    "crossChainMessaging": {
+      "protocol": "XCM",
+      "supportedChains": ["polkadot", "kusama", "acala", "moonbeam", "neuroweb"],
+      "messageTypes": ["reputation_sync", "identity_verification", "stake_query"]
+    },
+    "proofOfPersonhood": {
+      "verificationMethods": ["biometric", "social_graph", "behavioral", "economic"],
+      "credentialFormat": "W3C Verifiable Credential",
+      "anchoring": "neuroweb"
+    },
+    "staking": {
+      "supportedTokens": ["DOT", "KSM", "TRAC"],
+      "stakingTypes": ["reputation_stake", "note_verification_stake", "network_participation"]
+    }
+  },
+  
+  "graphAnalytics": {
+    "algorithms": [
+      "weighted_pagerank",
+      "community_detection",
+      "trust_propagation",
+      "influence_scoring",
+      "sybil_detection",
+      "cross_chain_reputation_aggregation"
+    ],
+    "metrics": [
+      "reputation_score",
+      "sybil_resistance_score",
+      "network_centrality",
+      "trust_score",
+      "influence_score",
+      "cross_chain_consistency"
+    ]
+  },
+  
+  "neuroSymbolicAI": {
+    "symbolicLayer": {
+      "format": "RDF/JSON-LD",
+      "reasoning": "SPARQL queries",
+      "provenance": "UAL citations"
+    },
+    "neuralLayer": {
+      "embeddings": "vector representations",
+      "similarity": "semantic search",
+      "completion": "LLM integration"
+    },
+    "integration": {
+      "method": "hybrid_retrieval",
+      "contextProtocol": "MCP",
+      "citationRequirement": "strict"
+    }
+  }
+}
+

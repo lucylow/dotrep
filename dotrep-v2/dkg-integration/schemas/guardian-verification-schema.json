@@ -1,0 +1,97 @@
+{
+  "@context": [
+    "https://schema.org/",
+    "https://guardian.umanitek.ai/schema/",
+    "https://dotrep.io/ontology/",
+    "http://www.w3.org/ns/prov#"
+  ],
+  "@type": "guardian:ContentVerificationReport",
+  "@id": "urn:ual:guardian:verification:example",
+  "schema:name": "Guardian Content Verification Report",
+  "schema:description": "Verification report from Umanitek Guardian AI Agent",
+  "schema:dateCreated": "2025-11-27T10:30:00Z",
+  "schema:about": {
+    "@type": "schema:MediaObject",
+    "schema:url": "https://example.com/content",
+    "schema:contentType": "image/jpeg"
+  },
+  "guardian:generatedBy": {
+    "@id": "did:dkg:umanitek-guardian",
+    "@type": "guardian:GuardianAgent",
+    "schema:name": "Umanitek Guardian AI Agent",
+    "schema:description": "AI agent for content safety verification",
+    "guardian:version": "1.0.0",
+    "guardian:partnerships": [
+      {
+        "@type": "schema:Organization",
+        "schema:name": "Videntifier",
+        "schema:description": "Forensic content identification"
+      },
+      {
+        "@type": "schema:Organization",
+        "schema:name": "ICMEC",
+        "schema:description": "International Centre for Missing & Exploited Children"
+      }
+    ]
+  },
+  "guardian:verificationResult": {
+    "@type": "guardian:VerificationResult",
+    "guardian:status": "flagged",
+    "guardian:confidence": 0.94,
+    "guardian:matchFound": true,
+    "guardian:matchType": "deepfake",
+    "guardian:originalFingerprint": {
+      "@type": "guardian:ContentFingerprint",
+      "guardian:hash": "0xabc123...",
+      "guardian:algorithm": "videntifier",
+      "guardian:metadata": {
+        "guardian:contentType": "image",
+        "guardian:size": 1024000,
+        "guardian:dimensions": {
+          "guardian:width": 1920,
+          "guardian:height": 1080
+        }
+      }
+    },
+    "guardian:recommendedAction": "takedown",
+    "guardian:processingTime": 150
+  },
+  "guardian:matches": [
+    {
+      "@type": "guardian:ContentMatch",
+      "guardian:matchId": "match-123",
+      "guardian:confidence": 0.94,
+      "guardian:matchType": "deepfake",
+      "guardian:sourceUAL": "ual:dkg:videntifier-db:xyz789",
+      "guardian:timestamp": 1701082200000,
+      "guardian:metadata": {
+        "guardian:source": "videntifier-database",
+        "guardian:detectionMethod": "perceptual-hash"
+      }
+    }
+  ],
+  "guardian:wasDerivedFrom": [
+    {
+      "@id": "ual:dkg:videntifier-db:xyz789",
+      "@type": "guardian:VidentifierDatabase",
+      "schema:name": "Videntifier Harmful Content Database"
+    }
+  ],
+  "prov:wasGeneratedBy": {
+    "@type": "prov:Activity",
+    "prov:wasAssociatedWith": "did:dkg:umanitek-guardian",
+    "prov:startedAtTime": "2025-11-27T10:29:45Z",
+    "prov:endedAtTime": "2025-11-27T10:30:00Z"
+  },
+  "dotrep:creator": {
+    "@id": "did:polkadot:5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+    "@type": "schema:Person"
+  },
+  "dotrep:impactOnReputation": {
+    "@type": "dotrep:ReputationImpact",
+    "dotrep:safetyScoreChange": -0.05,
+    "dotrep:slashingTriggered": false,
+    "dotrep:actionTaken": "flag"
+  }
+}
+

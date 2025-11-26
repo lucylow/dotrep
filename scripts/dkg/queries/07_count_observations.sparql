@@ -1,0 +1,11 @@
+# Query: Count temporal observations (interaction snapshots / observations)
+# Purpose: Quick scan to determine temporal data granularity
+
+PREFIX schema: <https://schema.org/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+
+SELECT (COUNT(?obs) AS ?observationCount)
+WHERE {
+  ?obs a prov:Entity, schema:Observation .
+}
+
