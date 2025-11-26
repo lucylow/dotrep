@@ -5,6 +5,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "./db";
+import { toTRPCError, logError } from "./_core/errorHandler";
 
 // Input validation schemas
 const githubUsernameSchema = z.object({
@@ -90,11 +91,8 @@ export const appRouter = router({
           if (error instanceof TRPCError) {
             throw error;
           }
-          console.error("[Router] Failed to get contributor by username:", error);
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to fetch contributor",
-          });
+          logError(error, { operation: "getByGithubUsername", username: input.username });
+          throw toTRPCError(error);
         }
       }),
     
@@ -107,11 +105,8 @@ export const appRouter = router({
         try {
           return await db.getAllContributors(input.limit);
         } catch (error) {
-          console.error("[Router] Failed to get all contributors:", error);
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to fetch contributors",
-          });
+          logError(error, { operation: "getAllContributors", limit: input.limit });
+          throw toTRPCError(error);
         }
       }),
     
@@ -281,11 +276,8 @@ export const appRouter = router({
             await api.connect();
             return await api.getReputation(input.accountId);
           } catch (error) {
-            console.error("[Router] Failed to get reputation:", error);
-            throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Failed to fetch reputation from blockchain",
-            });
+            logError(error, { operation: "getReputation", accountId: input.accountId });
+            throw toTRPCError(error);
           }
         }),
       
@@ -842,11 +834,8 @@ export const appRouter = router({
           const { backfillUserContributions } = await import("./services/githubGraphQL");
           return await backfillUserContributions(input.githubUsername, input.monthsBack);
         } catch (error) {
-          console.error("[Router] Backfill failed:", error);
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: error instanceof Error ? error.message : "Failed to backfill contributions",
-          });
+          logError(error, { operation: "backfill", githubUsername: input.githubUsername, monthsBack: input.monthsBack });
+          throw toTRPCError(error);
         }
       }),
 

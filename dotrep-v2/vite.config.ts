@@ -31,6 +31,46 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react/jsx-runtime'],
+          'router-vendor': ['wouter'],
+          'ui-vendor': [
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-tabs',
+            '@radix-ui/react-tooltip',
+          ],
+          'polkadot-vendor': [
+            '@polkadot/api',
+            '@polkadot/extension-dapp',
+            '@polkadot/util',
+            '@polkadot/util-crypto',
+          ],
+          'trpc-vendor': [
+            '@trpc/client',
+            '@trpc/react-query',
+            '@trpc/server',
+            '@tanstack/react-query',
+          ],
+          'animation-vendor': ['framer-motion'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+    sourcemap: process.env.NODE_ENV === 'development',
+    minify: 'esbuild',
+  },
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'wouter',
+      '@tanstack/react-query',
+      '@trpc/client',
+      '@trpc/react-query',
+    ],
   },
   server: {
     host: true,

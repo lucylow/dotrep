@@ -4,6 +4,8 @@ import mysql from "mysql2/promise";
 import { InsertUser, InsertContributor, users, contributors, contributions, achievements, anchors, Contributor, Contribution, Achievement, Anchor } from "../drizzle/schema";
 import { proofs } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { DatabaseError } from "@shared/_core/errors";
+import { retryWithBackoff, isRetryableError, logError } from "./_core/errorHandler";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _connectionPool: mysql.Pool | null = null;
@@ -13,6 +15,7 @@ let _connectionPool: mysql.Pool | null = null;
  */
 function createConnectionPool(): mysql.Pool | null {
   if (!process.env.DATABASE_URL) {
+    logError(new Error("DATABASE_URL not configured"), { operation: "createConnectionPool" });
     return null;
   }
 
@@ -31,10 +34,25 @@ function createConnectionPool(): mysql.Pool | null {
       enableKeepAlive: true,
       keepAliveInitialDelay: 0,
     });
+    
+    // Test connection
+    pool.getConnection()
+      .then(conn => {
+        conn.release();
+        console.log("[Database] Connection pool created successfully");
+      })
+      .catch(err => {
+        logError(err, { operation: "createConnectionPool", host: url.hostname });
+      });
+    
     return pool;
   } catch (error) {
-    console.error("[Database] Failed to create connection pool:", error);
-    return null;
+    logError(error, { operation: "createConnectionPool" });
+    throw new DatabaseError(
+      `Failed to create database connection pool: ${error instanceof Error ? error.message : String(error)}`,
+      "createConnectionPool",
+      error instanceof Error ? error : undefined
+    );
   }
 }
 
@@ -56,10 +74,19 @@ export async function getDb() {
         _db = drizzle(process.env.DATABASE_URL);
       }
     } catch (error) {
-      console.error("[Database] Failed to connect:", error);
-      _db = null;
+      logError(error, { operation: "getDb" });
+      throw new DatabaseError(
+        `Failed to get database connection: ${error instanceof Error ? error.message : String(error)}`,
+        "getDb",
+        error instanceof Error ? error : undefined
+      );
     }
   }
+  
+  if (!_db) {
+    throw new DatabaseError("Database connection not available. DATABASE_URL may not be configured.", "getDb");
+  }
+  
   return _db;
 }
 
@@ -77,64 +104,70 @@ export async function closeDb(): Promise<void> {
 /**
  * Upserts a user in the database
  * @param user - User data to insert or update
- * @throws {Error} If openId is missing or database operation fails
+ * @throws {DatabaseError} If openId is missing or database operation fails
  */
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
-    throw new Error("User openId is required for upsert");
+    throw new DatabaseError("User openId is required for upsert", "upsertUser");
   }
 
-  const db = await getDb();
-  if (!db) {
-    throw new Error("Database connection not available");
-  }
+  return retryWithBackoff(
+    async () => {
+      const db = await getDb();
+      const values: InsertUser = {
+        openId: user.openId,
+      };
+      const updateSet: Record<string, unknown> = {};
 
-  try {
-    const values: InsertUser = {
-      openId: user.openId,
-    };
-    const updateSet: Record<string, unknown> = {};
+      const textFields = ["name", "email", "loginMethod"] as const;
+      type TextField = (typeof textFields)[number];
 
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
+      const assignNullable = (field: TextField) => {
+        const value = user[field];
+        if (value === undefined) return;
+        const normalized = value ?? null;
+        values[field] = normalized;
+        updateSet[field] = normalized;
+      };
 
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
+      textFields.forEach(assignNullable);
 
-    textFields.forEach(assignNullable);
+      if (user.lastSignedIn !== undefined) {
+        values.lastSignedIn = user.lastSignedIn;
+        updateSet.lastSignedIn = user.lastSignedIn;
+      }
+      if (user.role !== undefined) {
+        values.role = user.role;
+        updateSet.role = user.role;
+      } else if (user.openId === ENV.ownerOpenId) {
+        values.role = 'admin';
+        updateSet.role = 'admin';
+      }
 
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
+      if (!values.lastSignedIn) {
+        values.lastSignedIn = new Date();
+      }
+
+      if (Object.keys(updateSet).length === 0) {
+        updateSet.lastSignedIn = new Date();
+      }
+
+      await db.insert(users).values(values).onDuplicateKeyUpdate({
+        set: updateSet,
+      });
+    },
+    {
+      maxRetries: 3,
+      retryable: isRetryableError,
     }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) {
-      values.lastSignedIn = new Date();
-    }
-
-    if (Object.keys(updateSet).length === 0) {
-      updateSet.lastSignedIn = new Date();
-    }
-
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
-      set: updateSet,
-    });
-  } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw new Error(`Failed to upsert user: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
+  ).catch((error) => {
+    logError(error, { operation: "upsertUser", openId: user.openId });
+    throw new DatabaseError(
+      `Failed to upsert user: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      "upsertUser",
+      error instanceof Error ? error : undefined
+    );
+  });
 }
 
 /**
@@ -147,17 +180,21 @@ export async function getUserByOpenId(openId: string) {
     return undefined;
   }
 
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot get user: database not available");
-    return undefined;
-  }
-
   try {
-    const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+    const db = await getDb();
+    const result = await retryWithBackoff(
+      async () => {
+        return await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+      },
+      {
+        maxRetries: 2,
+        retryable: isRetryableError,
+      }
+    );
     return result.length > 0 ? result[0] : undefined;
   } catch (error) {
-    console.error("[Database] Failed to get user by openId:", error);
+    logError(error, { operation: "getUserByOpenId", openId });
+    // Return undefined instead of throwing for query operations
     return undefined;
   }
 }

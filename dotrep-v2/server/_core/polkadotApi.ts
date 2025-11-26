@@ -1,6 +1,8 @@
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import type { AccountId, Balance } from "@polkadot/types/interfaces";
 import { getOnFinalityWsEndpoint } from "./env";
+import { NetworkError, TimeoutError, ExternalApiError } from "@shared/_core/errors";
+import { retryWithBackoff, withTimeout, isRetryableError, logError } from "./errorHandler";
 
 /**
  * Polkadot.js API service for interacting with DotRep parachain
@@ -128,19 +130,27 @@ export class PolkadotApiService {
         noInitWarn: true,
       });
 
-      await this.api.isReady;
+      await withTimeout(
+        this.api.isReady,
+        30000, // 30 second timeout
+        `Connection to ${this.wsEndpoint} timed out`
+      );
       this.connectionStatus = 'connected';
       this.reconnectAttempts = 0;
       console.log(`[Polkadot API] Connected to ${this.wsEndpoint}`);
     } catch (error) {
       this.connectionStatus = 'disconnected';
-      console.error("[Polkadot API] Connection failed:", error);
+      logError(error, { operation: "connect", endpoint: this.wsEndpoint });
       
       // Attempt reconnection
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         this.handleReconnection();
       } else {
-        throw new Error(`Failed to connect after ${this.maxReconnectAttempts} attempts`);
+        throw new NetworkError(
+          `Failed to connect to Polkadot node after ${this.maxReconnectAttempts} attempts`,
+          this.wsEndpoint,
+          error instanceof Error ? error : undefined
+        );
       }
     }
   }
@@ -243,37 +253,52 @@ export class PolkadotApiService {
     percentile: number;
     lastUpdated: number;
   }> {
-    if (!this.api) {
-      await this.connect();
-    }
+    await this.ensureConnected();
 
-    try {
-      const account = this.api.createType("AccountId", accountId);
-      const result = await this.api.query.reputation.reputationScores(account);
-      
-      if (result.isNone) {
-        return {
-          overall: 0,
-          breakdown: [],
-          percentile: 0,
-          lastUpdated: 0
-        };
+    return retryWithBackoff(
+      async () => {
+        try {
+          const account = this.api!.createType("AccountId", accountId);
+          const result = await withTimeout(
+            this.api!.query.reputation.reputationScores(account),
+            10000, // 10 second timeout
+            "Reputation query timed out"
+          );
+          
+          if (result.isNone) {
+            return {
+              overall: 0,
+              breakdown: [],
+              percentile: 0,
+              lastUpdated: 0
+            };
+          }
+
+          const score = result.unwrap();
+          return {
+            overall: score.overall.toNumber(),
+            breakdown: score.breakdown.map(([type, value]: any) => ({
+              type: type.toString(),
+              score: value.toNumber()
+            })),
+            percentile: score.percentile.toNumber(),
+            lastUpdated: score.lastUpdated.toNumber()
+          };
+        } catch (error) {
+          logError(error, { operation: "getReputation", accountId });
+          throw new ExternalApiError(
+            `Failed to get reputation: ${error instanceof Error ? error.message : String(error)}`,
+            "polkadot",
+            undefined,
+            error
+          );
+        }
+      },
+      {
+        maxRetries: 2,
+        retryable: isRetryableError,
       }
-
-      const score = result.unwrap();
-      return {
-        overall: score.overall.toNumber(),
-        breakdown: score.breakdown.map(([type, value]: any) => ({
-          type: type.toString(),
-          score: value.toNumber()
-        })),
-        percentile: score.percentile.toNumber(),
-        lastUpdated: score.lastUpdated.toNumber()
-      };
-    } catch (error) {
-      console.error("[Polkadot API] Error getting reputation:", error);
-      throw error;
-    }
+    );
   }
 
   /**

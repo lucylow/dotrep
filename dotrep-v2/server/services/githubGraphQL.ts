@@ -1,5 +1,7 @@
 import axios from "axios";
 import * as db from "../db";
+import { ExternalApiError, NetworkError, ValidationError } from "@shared/_core/errors";
+import { retryWithBackoff, withTimeout, isRetryableError, logError } from "../_core/errorHandler";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_API_URL = "https://api.github.com/graphql";
@@ -15,7 +17,11 @@ export async function fetchUserContributions(
 ): Promise<any> {
   const authToken = token || GITHUB_TOKEN;
   if (!authToken) {
-    throw new Error("GitHub token required for GraphQL queries");
+    throw new ValidationError("GitHub token required for GraphQL queries", "token");
+  }
+
+  if (!login || login.trim().length === 0) {
+    throw new ValidationError("GitHub username is required", "login");
   }
 
   const query = `
@@ -92,38 +98,78 @@ export async function fetchUserContributions(
     }
   `;
 
-  try {
-    const response = await axios.post(
-      GITHUB_API_URL,
-      {
-        query,
-        variables: {
-          login,
-          from: from.toISOString(),
-          to: to.toISOString(),
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-          "Content-Type": "application/json",
-        },
+  return retryWithBackoff(
+    async () => {
+      try {
+        const response = await withTimeout(
+          axios.post(
+            GITHUB_API_URL,
+            {
+              query,
+              variables: {
+                login,
+                from: from.toISOString(),
+                to: to.toISOString(),
+              },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${authToken}`,
+                "Content-Type": "application/json",
+              },
+            }
+          ),
+          30000, // 30 second timeout
+          "GitHub API request timed out"
+        );
+
+        if (response.data.errors) {
+          const errorMessage = response.data.errors.map((e: any) => e.message).join(", ");
+          throw new ExternalApiError(
+            `GitHub GraphQL errors: ${errorMessage}`,
+            "github",
+            response.status,
+            response.data.errors
+          );
+        }
+
+        return response.data.data;
+      } catch (error: any) {
+        if (error instanceof ExternalApiError) {
+          throw error;
+        }
+        
+        if (error.response) {
+          const statusCode = error.response.status;
+          const statusText = error.response.statusText;
+          const data = error.response.data;
+          
+          logError(error, { operation: "fetchUserContributions", login, statusCode });
+          
+          throw new ExternalApiError(
+            `GitHub API error: ${statusCode} ${statusText}`,
+            "github",
+            statusCode,
+            data
+          );
+        }
+        
+        if (error.code === "ECONNREFUSED" || error.code === "ETIMEDOUT" || error.code === "ENOTFOUND") {
+          throw new NetworkError(
+            `Failed to connect to GitHub API: ${error.message}`,
+            GITHUB_API_URL,
+            error
+          );
+        }
+        
+        throw error;
       }
-    );
-
-    if (response.data.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(response.data.errors)}`);
+    },
+    {
+      maxRetries: 3,
+      retryable: isRetryableError,
     }
-
-    return response.data.data;
-  } catch (error: any) {
-    if (error.response) {
-      throw new Error(
-        `GitHub API error: ${error.response.status} - ${JSON.stringify(error.response.data)}`
-      );
-    }
-    throw error;
-  }
+  );
 }
 
 /**

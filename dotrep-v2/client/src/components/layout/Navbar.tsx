@@ -31,33 +31,40 @@ export function Navbar() {
 
           {/* Desktop Navigation */}
           {!isMobile && (
-            <div className="flex items-center gap-6">
+            <nav className="flex items-center gap-6" aria-label="Main navigation">
               {navItems.map((item) => (
                 <Link key={item.path} href={item.path}>
                   <a
-                    className={`text-sm font-medium transition-colors ${
+                    className={`text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[#6C3CF0] focus:ring-offset-2 rounded-md px-2 py-1 ${
                       isActive(item.path)
                         ? "text-[#6C3CF0]"
                         : "text-[#4F4F4F] hover:text-[#6C3CF0]"
                     }`}
+                    aria-current={isActive(item.path) ? "page" : undefined}
                   >
                     {item.label}
                   </a>
                 </Link>
               ))}
               <Link href="/dashboard">
-                <Button className="btn-primary px-6 py-2">
+                <Button 
+                  className="btn-primary px-6 py-2 focus:outline-none focus:ring-2 focus:ring-[#6C3CF0] focus:ring-offset-2"
+                  aria-label="Open application dashboard"
+                >
                   Open App
                 </Button>
               </Link>
-            </div>
+            </nav>
           )}
 
           {/* Mobile Menu Button */}
           {isMobile && (
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-[#131313]"
+              className="p-2 text-[#131313] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#6C3CF0] focus:ring-offset-2 rounded-md"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -66,17 +73,24 @@ export function Navbar() {
 
         {/* Mobile Menu */}
         {isMobile && mobileMenuOpen && (
-          <div className="pb-4 border-t border-gray-200/60 mt-2">
+          <div 
+            id="mobile-menu"
+            className="pb-4 border-t border-gray-200/60 mt-2"
+            role="menu"
+            aria-label="Mobile navigation menu"
+          >
             <div className="flex flex-col gap-4 pt-4">
               {navItems.map((item) => (
                 <Link key={item.path} href={item.path}>
                   <a
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`text-base font-medium transition-colors ${
+                    className={`text-base font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-[#6C3CF0] focus:ring-offset-2 rounded-md px-2 py-1 ${
                       isActive(item.path)
                         ? "text-[#6C3CF0]"
                         : "text-[#4F4F4F] hover:text-[#6C3CF0]"
                     }`}
+                    role="menuitem"
+                    aria-current={isActive(item.path) ? "page" : undefined}
                   >
                     {item.label}
                   </a>
@@ -85,7 +99,8 @@ export function Navbar() {
               <Link href="/dashboard">
                 <Button
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full bg-gradient-to-r from-[#6C3CF0] to-[#A074FF] text-white rounded-xl py-2 shadow-[0_4px_14px_rgba(108,60,240,0.25)]"
+                  className="w-full bg-gradient-to-r from-[#6C3CF0] to-[#A074FF] text-white rounded-xl py-2 shadow-[0_4px_14px_rgba(108,60,240,0.25)] focus:outline-none focus:ring-2 focus:ring-[#6C3CF0] focus:ring-offset-2"
+                  role="menuitem"
                 >
                   Open App
                 </Button>
