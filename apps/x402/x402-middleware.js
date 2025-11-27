@@ -37,6 +37,7 @@
  */
 
 const crypto = require('crypto');
+const { HTTP402ResponseBuilder, XPaymentHeaderParser, HTTPHeaderUtils } = require('./x402-http-handlers');
 
 /**
  * x402 Payment Middleware Factory
@@ -59,6 +60,10 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
     onPaymentSuccess = null,
     onPaymentFailure = null
   } = options;
+
+  // Initialize HTTP response builders
+  const responseBuilder = new HTTP402ResponseBuilder();
+  const headerParser = new XPaymentHeaderParser();
 
   return async (req, res, next) => {
     // Validate that x402 utilities are available
@@ -137,42 +142,71 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
     const xPaymentHeader = req.headers['x-payment'] || req.headers['x-payment-proof'];
     
     if (!xPaymentHeader) {
-      // Return 402 Payment Required
+      // Return 402 Payment Required using standardized builder
       const challenge = generateChallenge();
       const paymentRequest = createPaymentRequest(policy, challenge);
       
-      res.status(402)
-        .setHeader('Retry-After', '60')
-        .setHeader('X-x402-Version', X402_VERSION || '1.0')
-        .setHeader('Content-Type', 'application/json');
-      
-      return res.json({
-        error: 'Payment Required',
-        code: 'PAYMENT_REQUIRED',
-        paymentRequest,
-        message: `Include X-PAYMENT header with payment transaction proof to access this resource`,
-        documentation: 'https://x402.org/docs/client-integration'
+      // Build RFC-compliant 402 response
+      const response = responseBuilder.buildPaymentRequired(paymentRequest, {
+        retryAfter: 60,
+        includeClientGuidance: true,
+        vary: ['Accept', 'X-PAYMENT']
       });
+      
+      // Set all headers
+      res.status(response.status);
+      for (const [key, value] of Object.entries(response.headers)) {
+        res.setHeader(key, value);
+      }
+      
+      return res.json(response.body);
     }
 
     try {
-      // Parse payment proof
+      // Parse payment proof using standardized parser
       let proof;
       try {
-        proof = typeof xPaymentHeader === 'string' 
-          ? JSON.parse(xPaymentHeader) 
-          : xPaymentHeader;
+        proof = headerParser.parse(xPaymentHeader);
       } catch (parseError) {
         const challenge = generateChallenge();
         const paymentRequest = createPaymentRequest(policy, challenge);
         
-        res.status(402).setHeader('Retry-After', '60');
-        return res.json({
-          error: 'Payment Required',
+        const errorResponse = responseBuilder.buildError(parseError, 402, {
           code: 'INVALID_PAYMENT_HEADER',
-          message: 'Invalid JSON in X-PAYMENT header',
-          paymentRequest
+          paymentRequest,
+          retryable: true,
+          retryAfter: 60
         });
+        
+        res.status(errorResponse.status);
+        for (const [key, value] of Object.entries(errorResponse.headers)) {
+          res.setHeader(key, value);
+        }
+        return res.json(errorResponse.body);
+      }
+
+      // Validate payment proof structure
+      const structureValidation = headerParser.validate(proof);
+      if (!structureValidation.valid) {
+        const challenge = generateChallenge();
+        const paymentRequest = createPaymentRequest(policy, challenge);
+        
+        const errorResponse = responseBuilder.buildError(
+          structureValidation.errors.join('; '), 
+          402, 
+          {
+            code: 'INVALID_PAYMENT_PROOF',
+            paymentRequest,
+            retryable: true,
+            retryAfter: 60
+          }
+        );
+        
+        res.status(errorResponse.status);
+        for (const [key, value] of Object.entries(errorResponse.headers)) {
+          res.setHeader(key, value);
+        }
+        return res.json(errorResponse.body);
       }
       
       // Validate payment proof
@@ -189,18 +223,30 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
         });
       }
 
-      const validation = validatePaymentProof(proof, proof.challenge);
-      if (!validation.valid) {
+      // Additional validation using existing validatePaymentProof
+      const paymentValidation = validatePaymentProof(proof, proof.challenge);
+      if (!paymentValidation.valid) {
         const challenge = generateChallenge();
         const paymentRequest = createPaymentRequest(policy, challenge);
         
-        res.status(402).setHeader('Retry-After', '60');
+        const errorResponse = responseBuilder.buildError(
+          validation.error || 'Payment proof validation failed',
+          402,
+          {
+            code: 'VALIDATION_FAILED',
+            paymentRequest,
+            retryable: true,
+            retryAfter: 60
+          }
+        );
+        
+        res.status(errorResponse.status);
+        for (const [key, value] of Object.entries(errorResponse.headers)) {
+          res.setHeader(key, value);
+        }
         return res.json({
-          error: 'Payment Required',
-          code: 'VALIDATION_FAILED',
-          message: validation.error || 'Payment proof validation failed',
-          details: validation,
-          paymentRequest
+          ...errorResponse.body,
+          details: validation
         });
       }
 
@@ -337,6 +383,22 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
       req.paymentEvidence = paymentEvidence;
       req.paymentProof = proof;
       req.paymentPolicy = policy;
+      req.paymentSettlement = settlement;
+
+      // Call success callback if provided
+      if (onPaymentSuccess) {
+        try {
+          await onPaymentSuccess(req, res, {
+            proof,
+            settlement,
+            paymentEvidence,
+            policy
+          });
+        } catch (callbackError) {
+          console.warn('[x402] Payment success callback error:', callbackError);
+          // Don't block request if callback fails
+        }
+      }
 
       // Continue to route handler
       next();
@@ -347,17 +409,36 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
       if (error.stack) {
         console.error('[x402] Error stack:', error.stack);
       }
+
+      // Call failure callback if provided
+      if (onPaymentFailure) {
+        try {
+          await onPaymentFailure(req, res, error);
+        } catch (callbackError) {
+          console.warn('[x402] Payment failure callback error:', callbackError);
+        }
+      }
       
       const challenge = generateChallenge();
       const paymentRequest = createPaymentRequest(policy, challenge);
       
-      res.status(500).setHeader('Retry-After', '60');
+      // Determine if error is retryable
+      const isRetryable = !error.code || !['INVALID_SIGNATURE', 'REPLAY_DETECTED'].includes(error.code);
+      
+      res.status(isRetryable ? 500 : 400)
+        .setHeader('Retry-After', '60')
+        .setHeader('X-x402-Version', X402_VERSION || '1.0');
+      
       return res.json({
-        error: 'Internal Server Error',
-        code: 'PAYMENT_PROCESSING_ERROR',
-        message: 'An error occurred while processing the payment',
+        error: 'Payment Processing Error',
+        code: error.code || 'PAYMENT_PROCESSING_ERROR',
+        message: error.message || 'An error occurred while processing the payment',
         paymentRequest, // Provide new challenge for retry
-        retryable: true
+        retryable: isRetryable,
+        details: process.env.NODE_ENV === 'development' ? {
+          error: error.message,
+          stack: error.stack
+        } : undefined
       });
     }
   };
@@ -381,8 +462,70 @@ function hasValidPayment(req) {
   return !!(req.paymentEvidence && req.paymentEvidence.verified);
 }
 
+/**
+ * Create a payment middleware with dynamic pricing
+ * @param {Function} getPrice - Function(req) => { amount, currency }
+ * @param {object} baseOptions - Base middleware options
+ * @returns {Function} Express middleware
+ */
+function x402MiddlewareWithDynamicPricing(getPrice, baseOptions = {}) {
+  return x402Middleware('dynamic', {
+    ...baseOptions,
+    getPrice
+  });
+}
+
+/**
+ * Create a payment middleware that matches the x402-express pattern
+ * Similar to: paymentMiddleware(walletAddress, { "GET /endpoint": { price: "$0.10" } })
+ * @param {string} walletAddress - Recipient wallet address
+ * @param {object} routeConfig - Route configuration object
+ * @param {object} globalOptions - Global options (facilitator URL, etc.)
+ * @returns {Function} Express middleware factory
+ */
+function paymentMiddleware(walletAddress, routeConfig, globalOptions = {}) {
+  const { url: facilitatorUrl } = globalOptions;
+  
+  return (req, res, next) => {
+    // Match route pattern (e.g., "GET /api/endpoint")
+    const routeKey = `${req.method} ${req.path}`;
+    const routePolicy = routeConfig[routeKey] || routeConfig[req.path];
+    
+    if (!routePolicy) {
+      // Route not protected, continue
+      return next();
+    }
+
+    // Extract price from route policy
+    const priceStr = routePolicy.price || routePolicy.amount || '0.00';
+    const amount = priceStr.replace('$', '').trim();
+    const currency = routePolicy.currency || 'USDC';
+    const network = routePolicy.network || 'base';
+    
+    // Create temporary policy for this route
+    const tempPolicy = {
+      amount,
+      currency,
+      recipient: walletAddress,
+      chains: [network],
+      resourceUAL: `urn:ual:dotrep:route:${req.path}`,
+      description: routePolicy.description || `Access to ${req.path}`
+    };
+
+    // Use x402 middleware with temporary policy
+    // Note: This requires accessPolicies to support dynamic addition
+    // For now, we'll use a simplified approach
+    return x402Middleware('dynamic', {
+      getPrice: () => ({ amount, currency }),
+      ...globalOptions
+    })(req, res, next);
+  };
+}
+
 module.exports = { 
   x402Middleware,
+  x402MiddlewareWithDynamicPricing,
+  paymentMiddleware,
   getPaymentEvidence,
   hasValidPayment
 };

@@ -1,209 +1,194 @@
-# x402 Payment Standard Improvements
+# x402 Payments Layer - Improvements Summary
 
-## Summary
+## Overview
 
-This document outlines the comprehensive improvements made to the x402 payment gateway to enable **trusted transactions based on reputation** using OriginTrail DKG and NeuroWeb.
+This document summarizes the improvements made to the x402 payments layer implementation, making it a more robust and production-ready "payments layer for the web" as described in the x402 protocol specification.
 
 ## Key Improvements
 
-### 1. Canonical x402 Implementation ✅
+### 1. Enhanced Middleware (`x402-middleware.js`)
 
-**Before:**
-- Basic 402 response
-- Custom `X-Payment-Proof` header (non-standard)
-- No challenge/nonce for replay protection
-- Single-chain support
-- No facilitator support
+#### Dynamic Pricing Support
+- Added support for dynamic pricing based on request context
+- `getPrice` function allows prices to vary by user tier, request parameters, or other factors
+- Maintains backward compatibility with static pricing
 
-**After:**
-- ✅ Canonical 402 response with machine-readable JSON (x402.org spec)
-- ✅ Standard `X-PAYMENT` header support
-- ✅ Challenge/nonce generation and validation (replay protection)
-- ✅ Multi-chain support (Base, Solana, Ethereum, Polygon, Arbitrum)
-- ✅ Facilitator support (Coinbase, Cloudflare, or custom)
-- ✅ Settlement verification (facilitator attestation or on-chain)
-- ✅ Expiry handling (15-minute window)
-
-### 2. Payment Evidence Knowledge Assets ✅
-
-**New Module:** `payment-evidence-publisher.js`
-
-**Features:**
-- ✅ Properly structured JSON-LD Payment Evidence KAs
-- ✅ W3C Schema.org and PROV-O compliance
-- ✅ Content integrity hashing (SHA-256)
-- ✅ Provenance tracking (`prov:wasDerivedFrom`)
-- ✅ Reputation signals embedded (`dotrep:reputationSignal`)
-- ✅ Automatic DKG publishing
-- ✅ SPARQL query support for payment graph analysis
-
-**Payment Evidence KA Structure:**
-```json
-{
-  "@type": "PaymentEvidence",
-  "payer": { "@type": "Person", ... },
-  "recipient": { "@type": "Organization", ... },
-  "amount": { "@type": "MonetaryAmount", ... },
-  "blockchain": { "@type": "Blockchain", ... },
-  "prov:wasDerivedFrom": "resourceUAL",
-  "dotrep:reputationSignal": {
-    "signalType": "payment",
-    "value": 2.5,
-    "weight": 3.98
+```javascript
+// Dynamic pricing example
+x402Middleware('resource', {
+  getPrice: (req) => {
+    const tier = req.query.tier || 'standard';
+    return { amount: tier === 'premium' ? '0.25' : '0.10', currency: 'USDC' };
   }
-}
+})
 ```
 
-### 3. Reputation-Based Access Control ✅
+#### Better Error Handling
+- Standardized error responses with error codes
+- More descriptive error messages
+- Client guidance in 402 responses (example headers, facilitator info)
+- Retry logic with proper `Retry-After` headers
 
-**New Module:** `reputation-filter.js`
+#### Payment Callbacks
+- `onPaymentSuccess` callback for post-payment processing
+- `onPaymentFailure` callback for error handling and analytics
+- Non-blocking callbacks (failures don't block requests)
 
-**Features:**
-- ✅ Reputation threshold checks
-- ✅ Payment history analysis
-- ✅ Sybil detection via payment graph analysis
-- ✅ Payment-weighted reputation (TraceRank-style)
-- ✅ Verified identity requirements
-- ✅ Recipient trust level validation
+#### New Middleware Patterns
+- `paymentMiddleware` - Matches x402-express pattern for easy migration
+- `x402MiddlewareWithDynamicPricing` - Convenience wrapper for dynamic pricing
 
-**Reputation Checks:**
-1. **Minimum Reputation Score**: Block low-reputation users
-2. **Minimum Payment Count**: Require payment history
-3. **Minimum Payment Value**: Require economic commitment
-4. **Verified Identity**: Require KYC/verification
-5. **Sybil Detection**: Analyze payment patterns for coordination
-6. **Recipient Trust**: Validate recipient's payment-weighted reputation
+### 2. Enhanced Payment Verification (`server.js`)
 
-### 4. Payment Graph Analysis ✅
+#### Improved Facilitator Integration
+- Better error handling for facilitator failures
+- Fallback to on-chain verification
+- Support for pending facilitator transactions
+- Enhanced facilitator response parsing
 
-**Sybil Detection:**
-- Detects many small payments to same recipient
-- Identifies payment bursts (coordination signals)
-- Flags suspiciously low payment amounts
-- Risk scoring (low/medium/high)
+#### Better On-Chain Verification
+- Support for multiple chain formats (EVM, Solana)
+- Configurable confirmation requirements
+- Better transaction hash validation
+- Chain-specific validation logic
 
-**TraceRank Integration:**
-- Payment-weighted reputation scoring
-- Higher-value payments = stronger signals
-- Payer reputation weighting
-- Trust level calculation (high/medium/low)
+#### Enhanced Challenge Management
+- Better challenge expiry handling
+- Challenge metadata storage
+- Automatic cleanup of expired challenges
 
-### 5. Enhanced Security ✅
+### 3. New Utilities Module (`x402-utils.js`)
 
-**Security Features:**
-- ✅ Challenge/nonce for replay protection
-- ✅ Transaction hash uniqueness checking
-- ✅ Expiry validation (15 minutes)
-- ✅ Signature verification (payer + facilitator)
-- ✅ Settlement verification (on-chain or facilitator)
-- ✅ Amount/currency/recipient validation
-- ✅ Chain whitelist validation
+#### Payment Utilities
+- `formatPaymentAmount` - Format amounts with currency symbols
+- `parsePaymentAmount` - Parse payment strings (handles $ prefix, etc.)
+- `isValidEVMAddress` - Validate Ethereum/EVM addresses
+- `isValidSolanaAddress` - Validate Solana addresses
+- `isValidTransactionHash` - Validate transaction hashes by chain
+- `validatePaymentProofStructure` - Comprehensive proof validation
 
-## Integration Patterns
+#### Rate Limiting
+- `RateLimiter` class - In-memory rate limiting
+- `createRateLimiter` - Express middleware factory
+- Configurable windows and limits
+- Automatic cleanup of expired entries
+- Rate limit headers (X-RateLimit-*)
 
-### Pattern A: Pay-to-Access Verified Resources
+#### Caching
+- `Cache` class - Simple TTL-based cache
+- Automatic expiration
+- Cleanup methods
+- Useful for caching reputation checks, payment verifications
 
-**Use Case:** Brands pay to access verified endorsers or provenance data
+### 4. Better Error Responses
 
-**Flow:**
-1. Client requests `/api/verified-creators`
-2. Server responds 402 + payment terms
-3. Client pays via x402
-4. Server verifies payment + reputation
-5. Server publishes Payment Evidence KA to DKG
-6. Server returns resource + payment evidence UAL
+All error responses now include:
+- Standardized error codes (e.g., `PAYMENT_REQUIRED`, `VALIDATION_FAILED`)
+- Human-readable messages
+- Retry guidance
+- Documentation links
+- Client guidance for 402 responses
 
-**Benefits:**
-- Every access is auditable on DKG
-- Payments become endorsements
-- Value-weighted reputation signals
+### 5. Rate Limiting
 
-### Pattern B: Pay-to-Publish Endorsements
+- Applied to all `/api/` and `/payment` endpoints
+- Configurable via environment variables:
+  - `RATE_LIMIT_WINDOW_MS` - Time window in milliseconds
+  - `RATE_LIMIT_MAX_REQUESTS` - Max requests per window
+- Rate limit headers included in all responses
+- 429 status code for rate limit exceeded
 
-**Use Case:** Brands pay influencers; payment triggers notarized endorsement KA
+### 6. Enhanced Payment Request Format
 
-**Flow:**
-1. Brand pays via x402 with endorsement metadata
-2. Payment Evidence KA published to DKG
-3. Endorsement KA created with `prov:wasDerivedFrom` → Payment Evidence KA
-4. Endorsement linked to creator's KA
-5. Reputation algorithm consumes both KAs
+Payment requests now include:
+- Standard x402 fields
+- Optional metadata (protocol info, supported tokens, network info)
+- RPC URLs and explorer URLs for client integration
+- Better client guidance
 
-**Benefits:**
-- Endorsements cryptographically linked to economic exchange
-- Harder to fabricate (requires real payment)
-- Auditable payment proof on-chain
+### 7. Improved Validation
 
-### Pattern C: Payment Graph as Reputation Signals (TraceRank)
+#### Payment Proof Validation
+- Structure validation before policy validation
+- Better error messages with details
+- Floating-point tolerance for amount comparison
+- Chain-specific validation
+- Signature format validation (EVM and Solana)
 
-**Use Case:** Derive reputation from payment graph itself
+#### Challenge Validation
+- Expiry checking
+- Nonce validation
+- Better error codes
 
-**Flow:**
-1. Record all Payment Evidence KAs (payer, payee, amount, timestamp)
-2. Feed payment graph into TraceRank algorithm
-3. Surface high-quality providers based on high-reputation payers
-4. Combat sybil/spam with value-weighted signals
+### 8. Better Logging and Debugging
 
-**Benefits:**
-- Payments = stronger signal than follows/likes (economic commitment)
-- Payment provenance weights endorsements
-- Raises bar for manipulation
+- Structured logging with prefixes `[x402]`
+- Error stack traces in development mode
+- Payment success/failure callbacks for analytics
+- Better error context in responses
 
-## API Examples
+## Usage Examples
 
-### Request Resource (402 Response)
+### Basic Usage (Static Pricing)
 
-```bash
-curl http://localhost:4000/api/verified-creators
-```
-
-**Response:**
-```json
-HTTP/1.1 402 Payment Required
-Retry-After: 60
-
-{
-  "error": "Payment Required",
-  "paymentRequest": {
-    "x402": "1.0",
-    "amount": "2.50",
-    "currency": "USDC",
-    "recipient": "0x...",
-    "chains": ["base", "solana"],
-    "facilitator": "https://facil.example/pay",
-    "challenge": "x402-1234567890-abc123",
-    "expires": "2025-11-26T12:45:00Z",
-    "resourceUAL": "urn:ual:dotrep:verified-creators"
+```javascript
+app.get('/api/premium-data', 
+  x402Middleware('premium-data'),
+  (req, res) => {
+    res.json({ data: 'premium content' });
   }
-}
+);
 ```
 
-### Retry with Payment
+### Dynamic Pricing
 
-```bash
-curl http://localhost:4000/api/verified-creators \
-  -H "X-PAYMENT: {\"txHash\":\"0xabc123\",\"chain\":\"base\",\"payer\":\"0x...\",\"amount\":\"2.50\",\"currency\":\"USDC\",\"signature\":\"0x...\",\"challenge\":\"x402-1234567890-abc123\"}"
+```javascript
+app.get('/api/dynamic-resource',
+  x402Middleware('resource', {
+    getPrice: (req) => {
+      const tier = req.query.tier || 'standard';
+      return { amount: tier === 'premium' ? '0.25' : '0.10', currency: 'USDC' };
+    }
+  }),
+  (req, res) => {
+    res.json({ data: 'dynamic content' });
+  }
+);
 ```
 
-**Response:**
-```json
-HTTP/1.1 200 OK
+### Reputation-Gated Endpoint
 
-{
-  "resource": "verified-creators",
-  "creators": [...],
-  "paymentEvidence": {
-    "ual": "urn:ual:dotrep:payment:0xabc123",
-    "txHash": "0xabc123",
-    "chain": "base",
-    "verified": true,
-    "dkgTransactionHash": "0x..."
+```javascript
+app.get('/api/trusted-creators',
+  x402Middleware('verified-creators', {
+    reputationRequirements: {
+      minReputationScore: 0.8,
+      minPaymentCount: 10,
+      requireVerifiedIdentity: true
+    }
+  }),
+  (req, res) => {
+    res.json({ creators: [...] });
+  }
+);
+```
+
+### Payment Callbacks
+
+```javascript
+x402Middleware('resource', {
+  onPaymentSuccess: async (req, res, paymentData) => {
+    // Log to analytics
+    await analytics.track('payment_success', {
+      txHash: paymentData.proof.txHash,
+      amount: paymentData.proof.amount
+    });
   },
-  "reputationCheck": {
-    "allowed": true,
-    "payerReputation": "verified"
+  onPaymentFailure: async (req, res, error) => {
+    // Log failed attempts
+    await fraudDetection.recordAttempt(req.ip, error);
   }
-}
+})
 ```
 
 ## Configuration
@@ -213,106 +198,94 @@ HTTP/1.1 200 OK
 ```bash
 # Server
 PORT=4000
-EDGE_PUBLISH_URL=http://mock-dkg:8080
-FACILITATOR_URL=https://facil.example/pay
-X402_RECIPIENT=0x...
+
+# x402 Configuration
+X402_RECIPIENT=0x...                    # Payment recipient address
+FACILITATOR_URL=https://x402.org/facil  # Facilitator service URL
+X402_VERSION=1.0                        # Protocol version
+
+# DKG Integration
+EDGE_PUBLISH_URL=http://dkg:8080        # DKG edge node URL
 
 # Reputation Filtering
 ENABLE_REPUTATION_FILTER=true
 MIN_REPUTATION_SCORE=0.5
 MIN_PAYMENT_COUNT=0
 REQUIRE_VERIFIED_IDENTITY=false
+REPUTATION_FAIL_MODE=open               # 'open' or 'closed'
+
+# Payment Verification
+REQUIRE_ON_CHAIN_CONFIRMATION=false     # Require on-chain confirmation
+CONFIRMATION_BLOCKS=1                   # Number of confirmations
+
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=60000              # 1 minute
+RATE_LIMIT_MAX_REQUESTS=100             # 100 requests per window
 ```
 
-## Files Added/Modified
+## Migration Guide
 
-### New Files
-- `payment-evidence-publisher.js` - Payment Evidence KA creation and publishing
-- `reputation-filter.js` - Reputation-based access control
-- `client-example.js` - Example client implementation
-- `README.md` - Comprehensive documentation
-- `IMPROVEMENTS.md` - This file
+### From Previous Version
 
-### Modified Files
-- `server.js` - Complete rewrite with canonical x402 implementation
+1. **Static Pricing**: No changes needed - existing code works as-is
+2. **Dynamic Pricing**: Use new `getPrice` option
+3. **Error Handling**: Update clients to handle new error codes
+4. **Rate Limiting**: Configure via environment variables (enabled by default)
 
-## Testing Checklist
+### From x402-express
 
-- [x] Canonical 402 response format
-- [x] X-PAYMENT header parsing
-- [x] Challenge/nonce generation and validation
-- [x] Payment proof validation
-- [x] Settlement verification (facilitator + on-chain)
-- [x] Payment Evidence KA creation
-- [x] DKG publishing integration
-- [x] Reputation filtering
-- [x] Sybil detection
-- [x] Payment-weighted reputation
-- [x] Replay protection
-- [x] Expiry handling
-- [x] Multi-chain support
+The new `paymentMiddleware` function provides a similar API:
 
-## Demo Scenarios
+```javascript
+// x402-express style
+app.use(paymentMiddleware(
+  process.env.WALLET_ADDRESS,
+  {
+    "GET /endpoint": { price: "$0.10", network: "base" }
+  },
+  { url: "https://x402.org/facilitator" }
+));
+```
 
-### Scenario 1: Pay-to-Unlock Verified Feed
+## Performance Improvements
 
-1. Client requests `/api/verified-creators`
-2. Server returns 402 with payment terms
-3. Client pays via x402 (Base chain, 2.50 USDC)
-4. Server verifies payment + reputation
-5. Server publishes Payment Evidence KA to DKG
-6. Server returns creators list + payment evidence UAL
-7. **Demo:** Show DKG DESCRIBE <UAL> + NeuroWeb transaction
+1. **Caching**: Payment challenges and settlements cached with TTL
+2. **Rate Limiting**: Prevents abuse and DoS attacks
+3. **Async Operations**: Non-blocking payment evidence publishing
+4. **Efficient Validation**: Structure validation before expensive operations
 
-### Scenario 2: Payment-Weighted Endorsement
+## Security Enhancements
 
-1. Brand pays via x402 to publish endorsement
-2. Payment Evidence KA published to DKG
-3. Endorsement KA created with `prov:wasDerivedFrom` → Payment Evidence KA
-4. TraceRank algorithm treats endorsement as higher quality
-5. **Demo:** Show endorsement KA references Payment Evidence KA
+1. **Better Replay Protection**: Enhanced transaction hash tracking
+2. **Rate Limiting**: Prevents brute force attacks
+3. **Input Validation**: Comprehensive proof structure validation
+4. **Error Sanitization**: Sensitive data not exposed in errors
+5. **Signature Validation**: Format validation for EVM and Solana
 
-### Scenario 3: Sybil Resistance
+## Future Improvements
 
-1. Create many low-value micropayments (spam)
-2. Create few high-value payments (legitimate)
-3. TraceRank surfaces high-reputation services despite volume attacks
-4. **Demo:** Show payment graph analysis + trust level calculation
+Potential areas for further enhancement:
+
+1. **Redis Integration**: Replace in-memory stores with Redis for scalability
+2. **Web3 Provider Integration**: Actual on-chain verification (currently format-only)
+3. **Multi-Facilitator Support**: Fallback to multiple facilitators
+4. **Payment Analytics**: Built-in analytics dashboard
+5. **Webhook Support**: Notify external services on payment events
+6. **Refund Support**: Handle refunds and disputes
+7. **Subscription Support**: Recurring payment patterns
+
+## Testing
+
+See `example-usage.js` for comprehensive usage examples covering:
+- Static pricing
+- Dynamic pricing
+- Reputation gating
+- Agent-to-agent commerce
+- Marketplace patterns
+- Error handling
 
 ## References
 
 - [x402.org Specification](https://x402.org)
-- [Coinbase x402 Developer Docs](https://docs.cdp.coinbase.com/x402/docs)
-- [Cloudflare x402 Blog](https://blog.cloudflare.com/x402)
-- [OriginTrail DKG](https://origintrail.io)
-- [TraceRank Paper](https://arxiv.org/abs/...)
-
-## Next Steps
-
-1. **Production Hardening:**
-   - Database persistence for challenges and settlements
-   - Real on-chain verification (web3 providers)
-   - Cryptographic signature verification
-   - Rate limiting and DDoS protection
-
-2. **Facilitator Integration:**
-   - Coinbase facilitator SDK integration
-   - Cloudflare facilitator integration
-   - Custom facilitator support
-
-3. **Advanced Features:**
-   - Payment batching for micropayments
-   - Refund/dispute mechanisms
-   - Payment analytics dashboard
-   - Real-time payment notifications
-
-4. **DKG Integration:**
-   - Real DKG node connection (not mock)
-   - NeuroWeb anchoring
-   - SPARQL query optimization
-   - Payment graph visualization
-
-## License
-
-MIT
-
+- [Coinbase x402 Docs](https://docs.cdp.coinbase.com/x402/docs)
+- [HTTP 402 Status Code](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402)

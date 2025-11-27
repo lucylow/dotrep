@@ -18,6 +18,8 @@ const crypto = require('crypto');
 const axios = require('axios');
 const { createAndPublishPaymentEvidence } = require('./payment-evidence-publisher');
 const { validateTransactionWithReputation } = require('./reputation-filter');
+const { createRateLimiter, Cache, validatePaymentProofStructure } = require('./x402-utils');
+const { createBlockchainPaymentService } = require('./blockchain-payment-service');
 
 const app = express();
 app.use(express.json());
@@ -25,9 +27,25 @@ app.use(express.json());
 // Request logging middleware
 app.use((req, res, next) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/payment')) {
-    console.log(`[x402] ${req.method} ${req.path} - ${req.headers['x-payment'] ? 'with payment' : 'no payment'}`);
+    const hasPayment = !!(req.headers['x-payment'] || req.headers['x-payment-proof']);
+    console.log(`[x402] ${req.method} ${req.path} - ${hasPayment ? 'with payment' : 'no payment'}`);
   }
   next();
+});
+
+// Rate limiting middleware (applied to all x402 endpoints)
+const rateLimiter = createRateLimiter({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'), // 1 minute
+  maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100') // 100 requests per minute
+});
+
+// Apply rate limiting to payment endpoints
+app.use('/api/', rateLimiter);
+app.use('/payment', rateLimiter);
+
+// Cache for payment challenges and settlements
+const paymentCache = new Cache({
+  defaultTTL: 15 * 60 * 1000 // 15 minutes (matches challenge expiry)
 });
 
 // Initialize x402 utilities - must be defined before use
@@ -61,10 +79,19 @@ function initializeX402Utils() {
 }
 
 // Make x402 utilities available to middleware
+// Use Proxy to lazy-load utilities and ensure proper initialization
 app.locals.x402 = new Proxy({}, {
   get: (target, prop) => {
     const utils = initializeX402Utils();
-    return utils[prop];
+    if (prop in utils) {
+      return utils[prop];
+    }
+    // Return undefined for missing properties (allows optional chaining)
+    return undefined;
+  },
+  has: (target, prop) => {
+    const utils = initializeX402Utils();
+    return prop in utils;
   }
 });
 
@@ -73,6 +100,15 @@ const EDGE_PUBLISH_URL = process.env.EDGE_PUBLISH_URL || 'http://mock-dkg:8080';
 const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://facil.example/pay';
 const X402_VERSION = process.env.X402_VERSION || '1.0';
 const ENABLE_REPUTATION_FILTER = process.env.ENABLE_REPUTATION_FILTER !== 'false';
+
+// Initialize blockchain payment service
+const blockchainPaymentService = createBlockchainPaymentService({
+  coinbaseFacilitatorUrl: process.env.COINBASE_FACILITATOR_URL,
+  cloudflareFacilitatorUrl: process.env.CLOUDFLARE_FACILITATOR_URL,
+  baseRpcUrl: process.env.BASE_RPC_URL,
+  ethereumRpcUrl: process.env.ETHEREUM_RPC_URL,
+  solanaRpcUrl: process.env.SOLANA_RPC_URL,
+});
 
 // Validate environment variables
 if (!process.env.X402_RECIPIENT && process.env.NODE_ENV === 'production') {
@@ -191,18 +227,30 @@ function generateChallenge() {
 
 /**
  * Create canonical x402 payment request response
+ * Follows x402.org specification for machine-readable payment terms
+ * @param {object} policy - Access policy
+ * @param {string} challenge - Payment challenge/nonce
+ * @param {object} options - Additional options
+ * @returns {object} Payment request object
  */
-function createPaymentRequest(policy, challenge) {
-  const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 min expiry
+function createPaymentRequest(policy, challenge, options = {}) {
+  const {
+    expiryMinutes = 15,
+    includeMetadata = true
+  } = options;
+
+  const expires = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
   
   // Store challenge for verification
   paymentChallenges.set(challenge, {
     policy,
     expires: new Date(expires).getTime(),
-    nonce: crypto.randomBytes(8).toString('hex')
+    nonce: crypto.randomBytes(8).toString('hex'),
+    createdAt: Date.now()
   });
 
-  return {
+  // Create canonical payment request following x402 spec
+  const paymentRequest = {
     x402: X402_VERSION,
     amount: policy.amount,
     currency: policy.currency,
@@ -214,62 +262,179 @@ function createPaymentRequest(policy, challenge) {
     resourceUAL: policy.resourceUAL,
     description: policy.description || 'Payment required to access this resource'
   };
+
+  // Add metadata if requested (useful for client integration)
+  if (includeMetadata) {
+    paymentRequest.metadata = {
+      protocol: 'x402',
+      version: X402_VERSION,
+      paymentMethod: 'EIP-3009', // Transfer With Authorization
+      supportedTokens: policy.chains?.includes('base') || policy.chains?.includes('base-sepolia') 
+        ? ['USDC'] 
+        : ['USDC', 'USDT'],
+      networkInfo: policy.chains?.map(chain => ({
+        chain,
+        rpcUrl: getChainRpcUrl(chain),
+        explorerUrl: getChainExplorerUrl(chain)
+      })) || []
+    };
+  }
+
+  return paymentRequest;
+}
+
+/**
+ * Get RPC URL for a chain (for client integration)
+ * @param {string} chain - Chain identifier
+ * @returns {string|null} RPC URL or null
+ */
+function getChainRpcUrl(chain) {
+  const rpcUrls = {
+    'base': 'https://mainnet.base.org',
+    'base-sepolia': 'https://sepolia.base.org',
+    'ethereum': 'https://eth.llamarpc.com',
+    'polygon': 'https://polygon-rpc.com',
+    'arbitrum': 'https://arb1.arbitrum.io/rpc',
+    'solana': 'https://api.mainnet-beta.solana.com'
+  };
+  return rpcUrls[chain.toLowerCase()] || null;
+}
+
+/**
+ * Get block explorer URL for a chain
+ * @param {string} chain - Chain identifier
+ * @returns {string|null} Explorer URL or null
+ */
+function getChainExplorerUrl(chain) {
+  const explorerUrls = {
+    'base': 'https://basescan.org',
+    'base-sepolia': 'https://sepolia.basescan.org',
+    'ethereum': 'https://etherscan.io',
+    'polygon': 'https://polygonscan.com',
+    'arbitrum': 'https://arbiscan.io',
+    'solana': 'https://solscan.io'
+  };
+  return explorerUrls[chain.toLowerCase()] || null;
 }
 
 /**
  * Validate payment proof from X-PAYMENT header
+ * Enhanced with better structure validation and error messages
  */
 function validatePaymentProof(proof, challenge) {
+  // First, validate proof structure
+  const structureValidation = validatePaymentProofStructure(proof);
+  if (!structureValidation.valid) {
+    return { 
+      valid: false, 
+      error: 'Invalid payment proof structure',
+      details: structureValidation.errors,
+      warnings: structureValidation.warnings
+    };
+  }
+
   const challengeData = paymentChallenges.get(challenge);
   
   if (!challengeData) {
-    return { valid: false, error: 'Invalid or expired challenge' };
+    return { valid: false, error: 'Invalid or expired challenge', code: 'INVALID_CHALLENGE' };
   }
 
   // Check expiry
   if (Date.now() > challengeData.expires) {
     paymentChallenges.delete(challenge);
-    return { valid: false, error: 'Challenge expired' };
-  }
-
-  // Validate required fields
-  if (!proof.txHash || !proof.chain || !proof.payer || !proof.amount || !proof.currency) {
-    return { valid: false, error: 'Missing required payment fields' };
+    return { valid: false, error: 'Challenge expired', code: 'CHALLENGE_EXPIRED' };
   }
 
   // Validate challenge matches
   if (proof.challenge !== challenge) {
-    return { valid: false, error: 'Challenge mismatch' };
+    return { valid: false, error: 'Challenge mismatch', code: 'CHALLENGE_MISMATCH' };
   }
 
-  // Validate amount and currency match policy
-  if (proof.amount !== challengeData.policy.amount || 
-      proof.currency !== challengeData.policy.currency) {
-    return { valid: false, error: 'Amount or currency mismatch' };
+  // Validate amount and currency match policy (with tolerance for floating point)
+  const proofAmount = parseFloat(proof.amount);
+  const policyAmount = parseFloat(challengeData.policy.amount);
+  const amountTolerance = 0.0001; // Small tolerance for floating point comparison
+  
+  if (Math.abs(proofAmount - policyAmount) > amountTolerance) {
+    return { 
+      valid: false, 
+      error: 'Amount mismatch',
+      code: 'AMOUNT_MISMATCH',
+      details: {
+        expected: challengeData.policy.amount,
+        received: proof.amount
+      }
+    };
+  }
+
+  if (proof.currency !== challengeData.policy.currency) {
+    return { 
+      valid: false, 
+      error: 'Currency mismatch',
+      code: 'CURRENCY_MISMATCH',
+      details: {
+        expected: challengeData.policy.currency,
+        received: proof.currency
+      }
+    };
   }
 
   // Validate recipient (if provided)
   if (proof.recipient && proof.recipient.toLowerCase() !== challengeData.policy.recipient.toLowerCase()) {
-    return { valid: false, error: 'Recipient mismatch' };
+    return { 
+      valid: false, 
+      error: 'Recipient mismatch',
+      code: 'RECIPIENT_MISMATCH',
+      details: {
+        expected: challengeData.policy.recipient,
+        received: proof.recipient
+      }
+    };
   }
 
   // Validate chain is supported
-  if (!challengeData.policy.chains.includes(proof.chain.toLowerCase())) {
-    return { valid: false, error: 'Unsupported chain' };
+  const proofChain = proof.chain.toLowerCase();
+  const supportedChains = challengeData.policy.chains.map(c => c.toLowerCase());
+  if (!supportedChains.includes(proofChain)) {
+    return { 
+      valid: false, 
+      error: 'Unsupported chain',
+      code: 'UNSUPPORTED_CHAIN',
+      details: {
+        received: proof.chain,
+        supported: challengeData.policy.chains
+      }
+    };
   }
 
-  // Validate signature (if provided)
+  // Validate signature format (if provided)
   if (proof.signature) {
-    // In production, verify cryptographic signature
-    // For demo, just check format
-    if (!proof.signature.startsWith('0x') && proof.signature.length < 64) {
-      return { valid: false, error: 'Invalid signature format' };
+    // EVM signature format: 0x followed by 130 hex characters (65 bytes)
+    const evmSigPattern = /^0x[a-fA-F0-9]{130}$/;
+    // Solana signature format: base58, typically 88 characters
+    const solanaSigPattern = /^[A-Za-z0-9]{80,100}$/;
+    
+    if (!evmSigPattern.test(proof.signature) && !solanaSigPattern.test(proof.signature)) {
+      return { 
+        valid: false, 
+        error: 'Invalid signature format',
+        code: 'INVALID_SIGNATURE_FORMAT'
+      };
     }
   }
 
   // Check for replay (txHash already used)
   if (paymentSettlements.has(proof.txHash)) {
-    return { valid: false, error: 'Transaction already processed (replay detected)' };
+    const existingSettlement = paymentSettlements.get(proof.txHash);
+    return { 
+      valid: false, 
+      error: 'Transaction already processed (replay detected)',
+      code: 'REPLAY_DETECTED',
+      details: {
+        originalTimestamp: existingSettlement.timestamp,
+        originalResource: existingSettlement.resourceId
+      }
+    };
   }
 
   return { valid: true, challengeData };
@@ -277,55 +442,177 @@ function validatePaymentProof(proof, challenge) {
 
 /**
  * Verify payment settlement (via facilitator or on-chain)
+ * Enhanced with real blockchain verification using blockchain-payment-service
  * @param {object} proof - Payment proof object
+ * @param {object} options - Verification options
+ * @param {boolean} options.requireOnChainConfirmation - Require on-chain confirmation (default: false for demo)
+ * @param {number} options.confirmationBlocks - Number of confirmations required (default: 1)
  * @returns {Promise<object>} Settlement verification result
  */
-async function verifySettlement(proof) {
+async function verifySettlement(proof, options = {}) {
+  const {
+    requireOnChainConfirmation = process.env.REQUIRE_ON_CHAIN_CONFIRMATION === 'true',
+    confirmationBlocks = parseInt(process.env.CONFIRMATION_BLOCKS || '1')
+  } = options;
+
   // Validate proof structure
   if (!proof || !proof.txHash) {
     return { verified: false, error: 'Invalid proof: missing txHash' };
   }
 
-  // If facilitator signature provided, verify via facilitator
+  // Step 1: Try facilitator verification first (fastest, gasless)
   if (proof.facilitatorSig && FACILITATOR_URL) {
     try {
-      const response = await axios.post(`${FACILITATOR_URL}/verify`, {
-        txHash: proof.txHash,
-        chain: proof.chain,
-        signature: proof.facilitatorSig
-      }, {
-        timeout: 5000,
-        validateStatus: (status) => status >= 200 && status < 500
-      });
+      const facilitatorResponse = await axios.post(
+        `${FACILITATOR_URL}/verify`,
+        {
+          txHash: proof.txHash,
+          chain: proof.chain,
+          signature: proof.facilitatorSig,
+          payer: proof.payer,
+          amount: proof.amount,
+          currency: proof.currency
+        },
+        {
+          timeout: 10000, // 10s timeout for facilitator
+          validateStatus: (status) => status >= 200 && status < 500,
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          }
+        }
+      );
       
-      if (response.status === 200 && response.data && response.data.verified) {
-        return { 
-          verified: true, 
-          method: 'facilitator', 
-          blockNumber: response.data.blockNumber || 'pending',
-          facilitatorData: response.data
-        };
+      if (facilitatorResponse.status === 200 && facilitatorResponse.data) {
+        const facilitatorData = facilitatorResponse.data;
+        
+        // Facilitator verified the payment
+        if (facilitatorData.verified === true || facilitatorData.status === 'verified') {
+          // If on-chain confirmation required, verify on-chain as well
+          if (requireOnChainConfirmation) {
+            try {
+              const onChainVerification = await blockchainPaymentService.verifyTransaction(
+                proof.txHash,
+                proof.chain,
+                proof.recipient,
+                proof.amount
+              );
+              
+              if (onChainVerification.verified) {
+                return {
+                  verified: true,
+                  method: 'facilitator+on-chain',
+                  blockNumber: onChainVerification.blockNumber || facilitatorData.blockNumber || 'pending',
+                  facilitatorData: facilitatorData,
+                  onChainVerification: onChainVerification,
+                  confirmations: onChainVerification.confirmations || facilitatorData.confirmations || 0,
+                  timestamp: facilitatorData.timestamp || new Date().toISOString()
+                };
+              }
+            } catch (onChainError) {
+              console.warn('[x402] On-chain verification failed after facilitator verification:', onChainError.message);
+            }
+          }
+          
+          return { 
+            verified: true, 
+            method: 'facilitator', 
+            blockNumber: facilitatorData.blockNumber || facilitatorData.block || 'pending',
+            facilitatorData: facilitatorData,
+            facilitatorTxHash: facilitatorData.facilitatorTxHash,
+            timestamp: facilitatorData.timestamp || new Date().toISOString(),
+            confirmations: facilitatorData.confirmations || 0
+          };
+        }
+        
+        // Facilitator returned pending status
+        if (facilitatorData.status === 'pending' && !requireOnChainConfirmation) {
+          return {
+            verified: true,
+            method: 'facilitator-pending',
+            blockNumber: 'pending',
+            facilitatorData: facilitatorData,
+            note: 'Payment submitted via facilitator, awaiting on-chain confirmation'
+          };
+        }
       }
     } catch (error) {
+      // Log but don't fail - fall back to on-chain verification
       console.warn('[x402] Facilitator verification failed, falling back to on-chain:', error.message);
+      if (error.response) {
+        console.warn('[x402] Facilitator response:', error.response.status, error.response.data);
+      }
     }
   }
 
-  // Fallback: verify on-chain (simplified for demo)
-  // In production, use web3 provider to check transaction inclusion
-  // For demo, accept if txHash format is valid
-  const txHashPattern = /^0x[a-fA-F0-9]{64}$/;
-  if (proof.txHash && txHashPattern.test(proof.txHash)) {
-    // In production, would query blockchain here
-    return { verified: true, method: 'on-chain', blockNumber: 'pending' };
+  // Step 2: Verify on-chain using blockchain payment service
+  try {
+    const onChainVerification = await blockchainPaymentService.verifyTransaction(
+      proof.txHash,
+      proof.chain,
+      proof.recipient,
+      proof.amount
+    );
+    
+    if (onChainVerification.verified) {
+      return {
+        verified: true,
+        method: 'on-chain',
+        blockNumber: onChainVerification.blockNumber || 'pending',
+        chain: proof.chain,
+        confirmations: onChainVerification.confirmations || 0,
+        status: onChainVerification.status || 'success',
+        gasUsed: onChainVerification.gasUsed,
+        pending: onChainVerification.pending || false
+      };
+    } else {
+      return {
+        verified: false,
+        error: onChainVerification.error || 'On-chain verification failed',
+        method: 'on-chain',
+        chain: proof.chain,
+        txHash: proof.txHash
+      };
+    }
+  } catch (error) {
+    console.error('[x402] On-chain verification error:', error.message);
+    
+    // Fallback: validate transaction hash format
+    const txHashPattern = /^0x[a-fA-F0-9]{64}$/;
+    const isEVMChain = proof.txHash && txHashPattern.test(proof.txHash);
+    const isSolanaChain = proof.txHash && 
+      proof.txHash.length >= 32 && 
+      proof.txHash.length <= 128 &&
+      !proof.txHash.startsWith('0x') &&
+      /^[A-Za-z0-9]+$/.test(proof.txHash);
+    
+    if (isEVMChain || isSolanaChain) {
+      // Format is valid, but couldn't verify on-chain
+      // In production, this should fail, but for demo we allow it
+      const allowFormatOnly = process.env.ALLOW_FORMAT_ONLY_VERIFICATION === 'true';
+      
+      if (allowFormatOnly) {
+        return {
+          verified: true,
+          method: 'format-validation',
+          blockNumber: 'pending',
+          chain: proof.chain,
+          note: 'Transaction hash format validated (on-chain verification unavailable)',
+          warning: 'On-chain verification failed, using format validation only'
+        };
+      }
+    }
+    
+    return {
+      verified: false,
+      error: error.message || 'Settlement verification failed',
+      details: {
+        txHash: proof.txHash,
+        chain: proof.chain,
+        error: error.message
+      }
+    };
   }
-
-  // Solana transaction hash format (base58, ~88 chars)
-  if (proof.txHash && proof.txHash.length >= 32 && proof.txHash.length <= 128 && !proof.txHash.startsWith('0x')) {
-    return { verified: true, method: 'on-chain', blockNumber: 'pending', chain: 'solana' };
-  }
-
-  return { verified: false, error: 'Settlement verification failed: invalid transaction hash format' };
 }
 
 // Payment Evidence KA creation and publishing moved to payment-evidence-publisher.js
@@ -368,8 +655,12 @@ app.get('/api/verified-creators', async (req, res) => {
         });
       }
 
-      // Verify settlement
-      const settlement = await verifySettlement(proof);
+      // Verify settlement with enhanced verification
+      const settlement = await verifySettlement(proof, {
+        requireOnChainConfirmation: process.env.REQUIRE_ON_CHAIN_CONFIRMATION === 'true',
+        confirmationBlocks: parseInt(process.env.CONFIRMATION_BLOCKS || '1')
+      });
+      
       if (!settlement.verified) {
         const challenge = generateChallenge();
         const paymentRequest = createPaymentRequest(policy, challenge);
@@ -377,8 +668,11 @@ app.get('/api/verified-creators', async (req, res) => {
         res.status(402).setHeader('Retry-After', '60');
         return res.json({
           error: 'Payment Required',
-          message: 'Payment settlement not verified',
-          paymentRequest
+          code: 'SETTLEMENT_NOT_VERIFIED',
+          message: settlement.error || 'Payment settlement not verified',
+          paymentRequest,
+          settlementDetails: settlement,
+          retryable: true
         });
       }
 

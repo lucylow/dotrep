@@ -970,9 +970,11 @@ export class SybilDetectiveAgent {
     const nodes = await Promise.all(
       accountIds.map(async (id) => {
         const risk = await this.detectSybilRisk(id);
+        const nodeType: 'legitimate' | 'sybil' | 'suspicious' = 
+          risk.isSybil ? 'sybil' : risk.risk > 0.3 ? 'suspicious' : 'legitimate';
         return {
           id,
-          type: risk.isSybil ? 'sybil' : risk.risk > 0.3 ? 'suspicious' : 'legitimate',
+          type: nodeType,
           risk: risk.risk,
         };
       })
@@ -1143,10 +1145,21 @@ export interface NegotiationResult {
 export class SmartContractNegotiatorAgent {
   private polkadotApi: PolkadotApiService;
   private x402GatewayUrl: string;
+  private x402Agent?: ReturnType<typeof import('./x402AutonomousAgent').createX402AutonomousAgent>;
 
-  constructor(polkadotApi: PolkadotApiService, x402GatewayUrl: string = 'http://localhost:4001') {
+  constructor(
+    polkadotApi: PolkadotApiService, 
+    x402GatewayUrl: string = 'http://localhost:4001',
+    x402AgentConfig?: import('./x402AutonomousAgent').AgentPaymentConfig
+  ) {
     this.polkadotApi = polkadotApi;
     this.x402GatewayUrl = x402GatewayUrl;
+    
+    // Initialize x402 autonomous agent if config provided
+    if (x402AgentConfig) {
+      const { createX402AutonomousAgent } = require('./x402AutonomousAgent');
+      this.x402Agent = createX402AutonomousAgent(x402AgentConfig);
+    }
   }
 
   /**
@@ -1269,7 +1282,34 @@ export class SmartContractNegotiatorAgent {
   }
 
   private async initiateX402Payment(deal: EndorsementDeal): Promise<string> {
-    // Call x402 gateway to initiate payment
+    // Use enhanced x402 autonomous agent if available
+    if (this.x402Agent) {
+      try {
+        // Use autonomous agent for payment
+        const paymentResult = await this.x402Agent.requestResource(
+          `${this.x402GatewayUrl}/api/agent/purchase`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productUAL: `urn:ual:dotrep:endorsement:${deal.contractHash}`,
+              agentId: this.x402Agent['config'].agentId,
+              buyer: this.x402Agent['config'].payerAddress,
+              maxPrice: deal.terms.basePayment.toString(),
+              minSellerReputation: 0.8,
+            }),
+          }
+        );
+
+        if (paymentResult.success && paymentResult.paymentEvidence) {
+          return paymentResult.paymentEvidence.ual || paymentResult.paymentProof?.txHash || 'pending';
+        }
+      } catch (error) {
+        console.error('[ContractNegotiator] x402 autonomous agent error:', error);
+      }
+    }
+
+    // Fallback to direct gateway call
     try {
       const response = await fetch(`${this.x402GatewayUrl}/payment/initiate`, {
         method: 'POST',

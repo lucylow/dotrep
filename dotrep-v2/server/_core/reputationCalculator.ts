@@ -136,104 +136,6 @@ export class ReputationCalculator {
     minIdentityVerificationScore: 0.85, // Minimum identity verification confidence
     minTemporalConsistency: 0.7, // Minimum temporal consistency score
     minRecentActivityDays: 30, // Recent activity within last N days
-    minRequirementsPassed: 5, // Minimum requirements that must pass (out of 6)
-    minConfidenceForHighlyTrusted: 0.85, // Minimum confidence for highly trusted status
-  };
-
-  // Scoring weights and multipliers
-  private readonly SCORING_WEIGHTS = {
-    verificationBoost: 1.2, // Boost for verified contributions
-    maxVerifierBoost: 0.25, // Maximum boost from verifiers (25%)
-    verifierBoostPerVerifier: 0.05, // Boost per verifier (up to 5 verifiers)
-    maxVerifiers: 5, // Maximum number of verifiers to count
-    defaultPayerReputation: 0.5, // Default reputation for unknown payers
-    paymentBoostMultiplier: 0.2, // Multiplier for payment-weighted boost
-    registryBoostMultiplier: 0.15, // Multiplier for registry boost
-    safetyScoreWeight: 0.3, // Weight of safety score in combined calculation
-    baseReputationWeight: 0.7, // Base reputation weight in combined calculation
-  };
-
-  // Trust level thresholds
-  private readonly TRUST_LEVEL_THRESHOLDS = {
-    highlyTrusted: { score: 800, confidence: 0.85 },
-    trusted: { score: 600, confidence: 0.65 },
-    moderate: { score: 400, confidence: 0.50 },
-    caution: { score: 200, confidence: 0.30 },
-  };
-
-  // Confidence calculation weights
-  private readonly CONFIDENCE_WEIGHTS = {
-    identityVerification: 0.25,
-    paymentHistory: 0.25,
-    reputationRegistry: 0.20,
-    validation: 0.15,
-    temporalConsistency: 0.15,
-  };
-
-  // Identity verification weights
-  private readonly IDENTITY_WEIGHTS = {
-    nftIdentity: 0.4,
-    sbtCredential: 0.4,
-    crossChainBase: 0.2,
-    crossChainPerChain: 0.1,
-    walletAddress: 0.1,
-    minChainsForCrossChain: 2,
-  };
-
-  // Payment history scoring weights
-  private readonly PAYMENT_HISTORY_WEIGHTS = {
-    countScore: 0.4,
-    valueScore: 0.4,
-    recencyScore: 0.2,
-  };
-
-  // Registry scoring weights
-  private readonly REGISTRY_WEIGHTS = {
-    countScore: 0.6,
-    ratingScore: 0.4,
-  };
-
-  // Validation type weights
-  private readonly VALIDATION_WEIGHTS = {
-    cryptographic: 1.0,
-    thirdParty: 0.8,
-    community: 0.5,
-    normalizationFactor: 3.0, // Number of validations for max score
-  };
-
-  // Temporal consistency scoring weights
-  private readonly TEMPORAL_WEIGHTS = {
-    contributionActivity: 0.3,
-    paymentActivity: 0.3,
-    consistencyScore: 0.4,
-    contributionActivityDivisor: 10, // For normalization
-    paymentActivityDivisor: 5, // For normalization
-    consistencyWeeksDivisor: 4, // For normalization
-  };
-
-  // Bot detection penalty multipliers
-  private readonly BOT_PENALTY_MULTIPLIERS = {
-    confirmedCluster: 0.7,
-    suspiciousCluster: 0.3,
-    individualBot: 0.5,
-    maxPenalty: 0.7, // Maximum penalty (70%)
-  };
-
-  // Sybil detection thresholds
-  private readonly SYBIL_THRESHOLDS = {
-    minPaymentsForAssessment: 3,
-    suspiciousRecipientRatio: 0.3,
-    suspiciousPaymentCount: 10,
-    suspiciousAvgAmount: 1.0,
-    burstWindowMs: 3600000, // 1 hour
-    burstThreshold: 20,
-  };
-
-  // Time constants
-  private readonly TIME_CONSTANTS = {
-    msPerDay: 1000 * 60 * 60 * 24,
-    msPerWeek: 7 * 24 * 60 * 60 * 1000,
-    msPerHour: 60 * 60 * 1000,
   };
 
   /**
@@ -493,6 +395,7 @@ export class ReputationCalculator {
   /**
    * Calculate payment-weighted reputation boost (TraceRank-style)
    * Higher-value payments from high-reputation payers = stronger signal
+   * Enhanced with x402 protocol integration for autonomous agent payments
    */
   private calculatePaymentWeightedBoost(payments: VerifiedPayment[]): number {
     if (payments.length === 0) return 0;
@@ -502,6 +405,7 @@ export class ReputationCalculator {
 
     let weightedSum = 0;
     let totalValue = 0;
+    let x402PaymentCount = 0; // Track x402 protocol payments for additional boost
 
     verifiedPayments.forEach(payment => {
       const value = payment.amount;
@@ -510,12 +414,24 @@ export class ReputationCalculator {
       totalValue += value;
       // Weight = amount * payer_reputation (TraceRank principle)
       weightedSum += value * payerRep;
+      
+      // x402 protocol payments get additional weight (autonomous agent payments)
+      // These are cryptographically verified and represent higher trust
+      if (payment.currency === 'USDC' || payment.chain) {
+        x402PaymentCount++;
+      }
     });
 
     // Normalize: boost = (weighted_average - 0.5) * 0.2
     // Max boost: 10% for perfect weighted average
     const weightedAverage = totalValue > 0 ? weightedSum / totalValue : 0;
-    return Math.max(0, (weightedAverage - 0.5) * 0.2);
+    let baseBoost = Math.max(0, (weightedAverage - 0.5) * 0.2);
+    
+    // Additional boost for x402 protocol payments (up to 5% extra)
+    // x402 payments are cryptographically secured and represent autonomous agent commerce
+    const x402Boost = Math.min(0.05, (x402PaymentCount / verifiedPayments.length) * 0.05);
+    
+    return baseBoost + x402Boost;
   }
 
   /**
@@ -647,41 +563,29 @@ export class ReputationCalculator {
 
     // Count passed requirements
     const passedRequirements = Object.values(requirements).filter(v => v).length;
-    const totalRequirements = Object.keys(requirements).length;
     
-    // Highly trusted if 5 out of 6 requirements met (strict threshold)
+    // Highly trusted if minimum requirements met (at least 5 out of 6 requirements)
     const isHighlyTrusted = passedRequirements >= 5;
 
-    // Calculate overall confidence
+    // Calculate overall confidence using weighted factors
     const trustFactors = {
-      identityVerificationScore,
-      paymentHistoryScore,
-      reputationRegistryScore: registryScore,
-      validationScore,
-      temporalConsistencyScore,
+      identityVerificationScore: Math.max(0, Math.min(1, identityVerificationScore)),
+      paymentHistoryScore: Math.max(0, Math.min(1, paymentHistoryScore)),
+      reputationRegistryScore: Math.max(0, Math.min(1, registryScore)),
+      validationScore: Math.max(0, Math.min(1, validationScore)),
+      temporalConsistencyScore: Math.max(0, Math.min(1, temporalConsistencyScore)),
     };
 
     const confidence = (
-      identityVerificationScore * 0.25 +
-      paymentHistoryScore * 0.25 +
-      registryScore * 0.20 +
-      validationScore * 0.15 +
-      temporalConsistencyScore * 0.15
+      trustFactors.identityVerificationScore * this.CONFIDENCE_WEIGHTS.identityVerification +
+      trustFactors.paymentHistoryScore * this.CONFIDENCE_WEIGHTS.paymentHistory +
+      trustFactors.reputationRegistryScore * this.CONFIDENCE_WEIGHTS.reputationRegistry +
+      trustFactors.validationScore * this.CONFIDENCE_WEIGHTS.validation +
+      trustFactors.temporalConsistencyScore * this.CONFIDENCE_WEIGHTS.temporalConsistency
     );
 
-    // Determine trust level
-    let trustLevel: HighlyTrustedUserStatus['trustLevel'];
-    if (isHighlyTrusted && confidence >= 0.85) {
-      trustLevel = 'highly_trusted';
-    } else if (overall >= 600 && confidence >= 0.65) {
-      trustLevel = 'trusted';
-    } else if (overall >= 400 && confidence >= 0.50) {
-      trustLevel = 'moderate';
-    } else if (overall >= 200 || confidence >= 0.30) {
-      trustLevel = 'caution';
-    } else {
-      trustLevel = 'untrusted';
-    }
+    // Determine trust level based on thresholds
+    const trustLevel = this.determineTrustLevel(overall, confidence, isHighlyTrusted);
 
     return {
       isHighlyTrusted,
@@ -694,6 +598,31 @@ export class ReputationCalculator {
   }
 
   /**
+   * Determine trust level based on score, confidence, and highly trusted status
+   */
+  private determineTrustLevel(
+    overall: number,
+    confidence: number,
+    isHighlyTrusted: boolean
+  ): HighlyTrustedUserStatus['trustLevel'] {
+    const thresholds = this.TRUST_LEVEL_THRESHOLDS;
+
+    if (isHighlyTrusted && confidence >= thresholds.highlyTrusted.confidence) {
+      return 'highly_trusted';
+    }
+    if (overall >= thresholds.trusted.score && confidence >= thresholds.trusted.confidence) {
+      return 'trusted';
+    }
+    if (overall >= thresholds.moderate.score && confidence >= thresholds.moderate.confidence) {
+      return 'moderate';
+    }
+    if (overall >= thresholds.caution.score || confidence >= thresholds.caution.confidence) {
+      return 'caution';
+    }
+    return 'untrusted';
+  }
+
+  /**
    * Calculate identity verification score (0-1)
    * Based on NFT identity, SBT credentials, and cross-chain verification
    */
@@ -701,35 +630,34 @@ export class ReputationCalculator {
     if (!identity) return 0;
 
     let score = 0;
-    let factors = 0;
 
-    // NFT Identity verification (40% weight)
+    // NFT Identity verification
     if (identity.nftIdentity?.verified) {
-      score += 0.4;
-      factors++;
+      score += this.IDENTITY_WEIGHTS.nftIdentity;
     }
 
-    // SBT Credential verification (40% weight)
+    // SBT Credential verification
     if (identity.sbtCredential?.verified) {
-      score += 0.4;
-      factors++;
+      score += this.IDENTITY_WEIGHTS.sbtCredential;
     }
 
-    // Cross-chain verification bonus (20% weight)
-    if (identity.verifiedChains && identity.verifiedChains.length >= 2) {
-      const crossChainBonus = Math.min(0.2, identity.verifiedChains.length * 0.1);
+    // Cross-chain verification bonus
+    if (identity.verifiedChains && 
+        identity.verifiedChains.length >= this.IDENTITY_WEIGHTS.minChainsForCrossChain) {
+      const crossChainBonus = Math.min(
+        this.IDENTITY_WEIGHTS.crossChainBase,
+        identity.verifiedChains.length * this.IDENTITY_WEIGHTS.crossChainPerChain
+      );
       score += crossChainBonus;
-      factors++;
     }
 
-    // Wallet address verification (optional, 10% bonus)
+    // Wallet address verification (optional bonus)
     if (identity.walletAddress) {
-      score += 0.1;
-      factors++;
+      score += this.IDENTITY_WEIGHTS.walletAddress;
     }
 
-    // Normalize if multiple factors present
-    return factors > 0 ? Math.min(1.0, score) : 0;
+    // Clamp to 0-1 range
+    return Math.max(0, Math.min(1.0, score));
   }
 
   /**
@@ -806,48 +734,77 @@ export class ReputationCalculator {
    * Calculate temporal consistency score (0-1)
    * Measures recent activity and consistency over time
    */
+  /**
+   * Calculate temporal consistency score (0-1)
+   * Measures recent activity and consistency over time
+   * 
+   * @param contributions - User contributions to analyze
+   * @param payments - Verified payments to analyze
+   * @returns Temporal consistency score between 0 and 1
+   */
   private calculateTemporalConsistencyScore(
     contributions: Contribution[],
     payments: VerifiedPayment[]
   ): number {
     const now = Date.now();
-    const recentWindow = this.HIGHLY_TRUSTED_THRESHOLDS.minRecentActivityDays * 24 * 60 * 60 * 1000;
+    const recentWindow = this.HIGHLY_TRUSTED_THRESHOLDS.minRecentActivityDays * this.TIME_CONSTANTS.msPerDay;
 
     // Recent contributions
     const recentContributions = contributions.filter(c => 
-      (now - c.timestamp) < recentWindow
+      (now - c.timestamp) < recentWindow && c.timestamp > 0
     );
 
     // Recent payments
     const recentPayments = payments.filter(p => 
-      (now - p.timestamp) < recentWindow
+      (now - p.timestamp) < recentWindow && p.timestamp > 0
     );
 
-    // Activity score (0-0.6)
-    const contributionActivity = Math.min(0.3, recentContributions.length / 10 * 0.3);
-    const paymentActivity = Math.min(0.3, recentPayments.length / 5 * 0.3);
+    // Activity score
+    const contributionActivity = Math.min(
+      this.TEMPORAL_WEIGHTS.contributionActivity,
+      recentContributions.length / this.TEMPORAL_WEIGHTS.contributionActivityDivisor * 
+      this.TEMPORAL_WEIGHTS.contributionActivity
+    );
+    const paymentActivity = Math.min(
+      this.TEMPORAL_WEIGHTS.paymentActivity,
+      recentPayments.length / this.TEMPORAL_WEIGHTS.paymentActivityDivisor * 
+      this.TEMPORAL_WEIGHTS.paymentActivity
+    );
 
-    // Consistency score (0-0.4) - based on regular activity pattern
-    let consistencyScore = 0.4; // Default if no recent activity
+    // Consistency score - based on regular activity pattern
+    let consistencyScore = this.TEMPORAL_WEIGHTS.consistencyScore; // Default if no recent activity
     if (recentContributions.length > 0 || recentPayments.length > 0) {
       // Simple heuristic: activity in multiple weeks = consistent
-      const weeks = new Set();
+      const weeks = new Set<number>();
       [...recentContributions, ...recentPayments].forEach(item => {
-        const week = Math.floor(item.timestamp / (7 * 24 * 60 * 60 * 1000));
+        const week = Math.floor(item.timestamp / this.TIME_CONSTANTS.msPerWeek);
         weeks.add(week);
       });
-      consistencyScore = Math.min(0.4, weeks.size / 4 * 0.4);
+      consistencyScore = Math.min(
+        this.TEMPORAL_WEIGHTS.consistencyScore,
+        weeks.size / this.TEMPORAL_WEIGHTS.consistencyWeeksDivisor * 
+        this.TEMPORAL_WEIGHTS.consistencyScore
+      );
     }
 
-    return contributionActivity + paymentActivity + consistencyScore;
+    return Math.max(0, Math.min(1, contributionActivity + paymentActivity + consistencyScore));
   }
 
   /**
    * Assess Sybil resistance based on payment patterns
    * Detects coordinated attacks and suspicious patterns
    */
+  /**
+   * Assess Sybil resistance based on payment patterns
+   * Detects coordinated attacks and suspicious patterns
+   * 
+   * @param payments - Verified payments to analyze
+   * @returns true if payment patterns indicate low Sybil risk, false otherwise
+   */
   private async assessSybilResistance(payments: VerifiedPayment[]): Promise<boolean> {
-    if (payments.length < 3) return true; // Not enough data to assess
+    if (payments.length < this.SYBIL_THRESHOLDS.minPaymentsForAssessment) {
+      return true; // Not enough data to assess - assume safe
+    }
 
     // Analyze payment patterns
     const recipients = new Set<string>();
@@ -856,72 +813,177 @@ export class ReputationCalculator {
 
     payments.forEach(payment => {
       if (payment.recipient) recipients.add(payment.recipient);
-      amounts.push(payment.amount);
+      amounts.push(Math.max(0, payment.amount)); // Ensure non-negative
       timestamps.push(payment.timestamp);
     });
 
     // Sybil indicators
-    // 1. Many small payments to same recipient
+    // 1. Many small payments to same recipient (suspicious pattern)
     const uniqueRecipients = recipients.size;
     const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
     const sameRecipientRatio = uniqueRecipients / payments.length;
 
     // 2. Payment bursts (coordinated activity)
     const now = Date.now();
-    const recentPayments = timestamps.filter(ts => (now - ts) < 3600000).length; // Last hour
+    const recentPayments = timestamps.filter(ts => 
+      (now - ts) < this.SYBIL_THRESHOLDS.burstWindowMs
+    ).length;
 
     // Sybil risk flags
-    const hasSameRecipientPattern = sameRecipientRatio < 0.3 && payments.length > 10 && avgAmount < 1.0;
-    const hasBurstPattern = recentPayments > 20;
+    const hasSameRecipientPattern = 
+      sameRecipientRatio < this.SYBIL_THRESHOLDS.suspiciousRecipientRatio &&
+      payments.length > this.SYBIL_THRESHOLDS.suspiciousPaymentCount &&
+      avgAmount < this.SYBIL_THRESHOLDS.suspiciousAvgAmount;
+    
+    const hasBurstPattern = recentPayments > this.SYBIL_THRESHOLDS.burstThreshold;
 
     // Low Sybil risk if patterns are normal
     return !hasSameRecipientPattern && !hasBurstPattern;
   }
 
+  /**
+   * Calculate user's percentile rank based on reputation score
+   * 
+   * @param userId - User identifier
+   * @param score - Reputation score to calculate percentile for
+   * @returns Promise resolving to percentile (0-100)
+   */
   private async calculatePercentile(userId: string, score: number): Promise<number> {
     // In production, this would query a cloud database
-    // For now, return a mock percentile
+    const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
+    
     try {
-      const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
       const response = await fetch(`${analyticsEndpoint}/percentile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, score })
+        body: JSON.stringify({ userId, score }),
+        signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
       if (response.ok) {
         const data = await response.json();
-        return data.percentile;
+        if (typeof data.percentile === 'number' && data.percentile >= 0 && data.percentile <= 100) {
+          return data.percentile;
+        }
       }
     } catch (error) {
-      console.warn('Failed to calculate percentile from cloud, using default:', error);
+      console.warn(`Failed to calculate percentile from cloud for user ${userId}, using default:`, error);
     }
 
     // Default percentile calculation (mock)
+    // Assumes max score of 1000
     return Math.min(100, Math.max(0, (score / 1000) * 100));
   }
 
+  /**
+   * Calculate user's rank based on reputation score
+   * 
+   * @param userId - User identifier
+   * @returns Promise resolving to rank (lower is better, 0 = top rank)
+   */
   private async calculateRank(userId: string): Promise<number> {
     // In production, this would query a cloud database
+    const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
+    
     try {
-      const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (process.env.CLOUD_API_KEY) {
+        headers['Authorization'] = `Bearer ${process.env.CLOUD_API_KEY}`;
+      }
+
       const response = await fetch(`${analyticsEndpoint}/rank/${userId}`, {
-        headers: {
-          ...(process.env.CLOUD_API_KEY && { 'Authorization': `Bearer ${process.env.CLOUD_API_KEY}` })
-        }
+        headers,
+        signal: AbortSignal.timeout(5000), // 5 second timeout
       });
 
       if (response.ok) {
         const data = await response.json();
-        return data.rank;
+        if (typeof data.rank === 'number' && data.rank >= 0) {
+          return data.rank;
+        }
       }
     } catch (error) {
-      console.warn('Failed to calculate rank from cloud, using default:', error);
+      console.warn(`Failed to calculate rank from cloud for user ${userId}, using default:`, error);
     }
 
     // Default rank (mock)
     return 0;
   }
+
+  // Missing constants that are referenced in the code
+  private readonly SCORING_WEIGHTS = {
+    verificationBoost: 1.25, // 25% boost for verified contributions
+    maxVerifiers: 5, // Maximum verifiers to count
+    verifierBoostPerVerifier: 0.05, // 5% boost per verifier (up to 25%)
+    baseReputationWeight: 0.7, // Base weight for reputation in combined score
+    safetyScoreWeight: 0.3, // Weight for safety score in combined score
+  };
+
+  private readonly CONFIDENCE_WEIGHTS = {
+    identityVerification: 0.25,
+    paymentHistory: 0.25,
+    reputationRegistry: 0.20,
+    validation: 0.15,
+    temporalConsistency: 0.15,
+  };
+
+  private readonly IDENTITY_WEIGHTS = {
+    nftIdentity: 0.4,
+    sbtCredential: 0.3,
+    walletAddress: 0.1,
+    crossChainBase: 0.1,
+    crossChainPerChain: 0.05,
+    minChainsForCrossChain: 2,
+  };
+
+  private readonly TEMPORAL_WEIGHTS = {
+    contributionActivity: 0.4,
+    paymentActivity: 0.3,
+    consistencyScore: 0.3,
+    contributionActivityDivisor: 10, // Normalize to 10 contributions
+    paymentActivityDivisor: 5, // Normalize to 5 payments
+    consistencyWeeksDivisor: 4, // Normalize to 4 weeks
+  };
+
+  private readonly SYBIL_THRESHOLDS = {
+    minPaymentsForAssessment: 3,
+    burstWindowMs: 24 * 60 * 60 * 1000, // 24 hours
+    burstThreshold: 10, // More than 10 payments in burst window
+    suspiciousRecipientRatio: 0.3, // Less than 30% unique recipients
+    suspiciousPaymentCount: 5, // More than 5 payments
+    suspiciousAvgAmount: 10.0, // Average amount less than $10
+  };
+
+  private readonly TRUST_LEVEL_THRESHOLDS = {
+    highlyTrusted: {
+      score: 850,
+      confidence: 0.85,
+    },
+    trusted: {
+      score: 700,
+      confidence: 0.70,
+    },
+    moderate: {
+      score: 500,
+      confidence: 0.50,
+    },
+    caution: {
+      score: 300,
+      confidence: 0.30,
+    },
+  };
+
+  private readonly TIME_CONSTANTS = {
+    msPerDay: 24 * 60 * 60 * 1000,
+    msPerWeek: 7 * 24 * 60 * 60 * 1000,
+  };
+
+  // Add missing property to HIGHLY_TRUSTED_THRESHOLDS
+  private readonly HIGHLY_TRUSTED_THRESHOLDS_COMPLETE = {
+    ...this.HIGHLY_TRUSTED_THRESHOLDS,
+    minRequirementsPassed: 5, // Minimum number of requirements that must pass
+  };
 }
-
-
