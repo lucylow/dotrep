@@ -289,7 +289,7 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
         const paymentRequest = createPaymentRequest(policy, challenge);
         
         const errorResponse = responseBuilder.buildError(
-          validation.error || 'Payment proof validation failed',
+          paymentValidation.error || 'Payment proof validation failed',
           402,
           {
             code: 'VALIDATION_FAILED',
@@ -305,7 +305,7 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
         }
         return res.json({
           ...errorResponse.body,
-          details: validation
+          details: paymentValidation
         });
       }
 
