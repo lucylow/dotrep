@@ -81,6 +81,13 @@ export class PolkadotApiService {
     relayChain?: string;
     blockNumber: number;
     blockHash: string;
+    chainId?: number;
+    paraId?: number;
+    nativeCurrency?: {
+      name: string;
+      symbol: string;
+      decimals: number;
+    };
   } | null> {
     if (!(await this.isNeuroWeb())) {
       return null;
@@ -91,20 +98,97 @@ export class PolkadotApiService {
 
     try {
       const chainInfo = await this.api.rpc.system.chain();
+      const chainName = chainInfo.toString();
       const blockHash = await this.api.rpc.chain.getBlockHash();
       const signedBlock = await this.api.rpc.chain.getBlock(blockHash);
       const blockNumber = signedBlock.block.header.number.toNumber();
 
+      // Determine if mainnet or testnet based on chain name
+      const isMainnet = chainName.toLowerCase().includes('neuroweb') && 
+                       !chainName.toLowerCase().includes('test');
+      const paraId = isMainnet ? 2043 : 20430;
+      const chainId = isMainnet ? 2043 : 20430;
+      const relayChain = isMainnet ? 'polkadot' : 'rococo';
+
       return {
-        chainName: chainInfo.toString(),
+        chainName,
         isParachain: true,
-        relayChain: 'polkadot', // NeuroWeb is secured by Polkadot
+        relayChain,
         blockNumber,
         blockHash: blockHash.toString(),
+        chainId,
+        paraId,
+        nativeCurrency: {
+          name: 'NEURO',
+          symbol: 'NEURO',
+          decimals: 18,
+        },
       };
     } catch (error) {
       console.error('Failed to get NeuroWeb info:', error);
       return null;
+    }
+  }
+
+  /**
+   * Get NeuroWeb parachain ID
+   */
+  async getNeuroWebParaId(): Promise<number | null> {
+    const info = await this.getNeuroWebInfo();
+    return info?.paraId || null;
+  }
+
+  /**
+   * Send XCM message to NeuroWeb
+   * 
+   * This allows sending cross-chain messages from other parachains to NeuroWeb
+   */
+  async sendXCMToNeuroWeb(
+    message: any,
+    options?: {
+      maxWeight?: bigint;
+      feeAsset?: any;
+    }
+  ): Promise<{ txHash: string; status: string }> {
+    await this.ensureConnected();
+    if (!this.api) {
+      throw new Error('API not connected');
+    }
+
+    const paraId = await this.getNeuroWebParaId();
+    if (!paraId) {
+      throw new Error('Not connected to NeuroWeb or para ID not found');
+    }
+
+    try {
+      // Construct XCM message for NeuroWeb
+      // In production, this would use proper XCM v3 format
+      const dest = {
+        V3: {
+          parents: 1,
+          interior: {
+            X1: {
+              Parachain: paraId,
+            },
+          },
+        },
+      };
+
+      // Create XCM transaction
+      const tx = this.api.tx.polkadotXcm?.limitedReserveTransferAssets?.(
+        dest,
+        message.assets || [],
+        message.fee || 0,
+        options?.maxWeight || BigInt(5000000000),
+      ) || this.api.tx.system.remark(JSON.stringify(message));
+
+      return {
+        txHash: tx.hash.toString(),
+        status: 'pending_signature',
+      };
+    } catch (error: any) {
+      console.error('[Polkadot API] Error sending XCM to NeuroWeb:', error);
+      throw error;
     }
   }
 
@@ -201,9 +285,9 @@ export class PolkadotApiService {
                 error_code: "u8",
                 error_message: "Vec<u8>"
               }
-            }
+            } as any
           }
-        },
+        } as any,
         noInitWarn: true,
       });
 
@@ -392,9 +476,12 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const account = this.api.createType("AccountId", accountId);
       const result = await this.api.query.reputation.contributions(account);
-      return result.length;
+      const resultArray = result as any;
+      return (Array.isArray(resultArray) ? resultArray.length : 
+              (resultArray?.toArray ? resultArray.toArray().length : 0)) || 0;
     } catch (error) {
       console.warn("[Polkadot API] Error getting contribution count, using mock data:", error);
       return getMockContributionCount(accountId);
@@ -506,6 +593,7 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const proposals = await this.api.query.governance.proposals.entries();
       
       if (proposals.length === 0) {
@@ -514,17 +602,19 @@ export class PolkadotApiService {
       }
       
       return proposals.map(([key, value]: any) => {
-        const proposal = value.unwrap();
+        if (!value || !key) return null;
+        const proposal = (value as any).unwrap ? (value as any).unwrap() : value;
+        const keyArgs = (key as any).args || [];
         return {
-          id: key.args[0].toNumber(),
-          proposer: proposal.proposer.toString(),
-          title: proposal.title?.toString() || "Untitled Proposal",
-          status: proposal.status.toString(),
-          votesFor: proposal.votesFor.toNumber(),
-          votesAgainst: proposal.votesAgainst.toNumber(),
-          endBlock: proposal.endBlock.toNumber()
+          id: keyArgs[0]?.toNumber?.() || 0,
+          proposer: proposal?.proposer?.toString() || '',
+          title: proposal?.title?.toString() || "Untitled Proposal",
+          status: proposal?.status?.toString() || 'Unknown',
+          votesFor: proposal?.votesFor?.toNumber?.() || 0,
+          votesAgainst: proposal?.votesAgainst?.toNumber?.() || 0,
+          endBlock: proposal?.endBlock?.toNumber?.() || 0
         };
-      });
+      }).filter((p): p is { id: number; proposer: string; title: string; status: string; votesFor: number; votesAgainst: number; endBlock: number } => p !== null);
     } catch (error) {
       console.warn("[Polkadot API] Error getting proposals, using mock data:", error);
       // Return mock data if query fails
@@ -553,20 +643,37 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const account = this.api.createType("AccountId", accountId);
       const nfts = await this.api.query.nft.nfts(account);
+      const nftsArray = (nfts as any);
       
-      if (nfts.length === 0) {
+      if (!nftsArray) {
         // Return mock data if no NFTs found
         return getMockNfts(accountId);
       }
       
-      return nfts.map((nft: any) => ({
-        id: nft.id.toNumber(),
-        achievementType: nft.achievementType.toString(),
-        metadata: nft.metadata.toString(),
-        mintedAt: nft.mintedAt.toNumber(),
-        soulbound: nft.soulbound.toBoolean()
+      // Handle different Codec types
+      let nftsList: any[] = [];
+      if (Array.isArray(nftsArray)) {
+        nftsList = nftsArray;
+      } else if (nftsArray?.toArray) {
+        nftsList = nftsArray.toArray();
+      } else if (nftsArray?.toHuman) {
+        const human = nftsArray.toHuman();
+        nftsList = Array.isArray(human) ? human : [];
+      }
+      
+      if (nftsList.length === 0) {
+        return getMockNfts(accountId);
+      }
+      
+      return nftsList.map((nft: any) => ({
+        id: nft?.id?.toNumber?.() || 0,
+        achievementType: nft?.achievementType?.toString() || '',
+        metadata: nft?.metadata?.toString() || '',
+        mintedAt: nft?.mintedAt?.toNumber?.() || 0,
+        soulbound: nft?.soulbound?.toBoolean?.() || false
       }));
     } catch (error) {
       console.warn("[Polkadot API] Error getting NFTs, using mock data:", error);
@@ -595,21 +702,27 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const [chain, version, chainType] = await Promise.all([
         this.api.rpc.system.chain(),
         this.api.rpc.system.version(),
-        this.api.rpc.system.chainType(),
-        this.api.registry.chainProperties
+        this.api.rpc.system.chainType()
       ]);
 
-      const properties = this.api.registry.chainProperties;
+      const properties = this.api.registry.getChainProperties();
+      const tokenDecimals = properties?.tokenDecimals;
+      const decimalsValue = tokenDecimals 
+        ? (Array.isArray(tokenDecimals) && tokenDecimals.length > 0 
+          ? (tokenDecimals[0] as any)?.toNumber?.() || 10
+          : (tokenDecimals as any)?.toNumber?.() || 10)
+        : 10;
       
       return {
-        name: chain.toString(),
-        version: version.toString(),
-        chainType: chainType.toString(),
+        name: chain ? chain.toString() : 'Unknown',
+        version: version ? version.toString() : 'Unknown',
+        chainType: chainType ? chainType.toString() : 'Unknown',
         tokenSymbol: properties?.tokenSymbol?.toString() || "DOT",
-        tokenDecimals: properties?.tokenDecimals?.toNumber() || 10
+        tokenDecimals: decimalsValue
       };
     } catch (error) {
       console.warn("[Polkadot API] Error getting chain info, using mock data:", error);
@@ -632,6 +745,7 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const header = await this.api.rpc.chain.getHeader();
       return header.number.toNumber();
     } catch (error) {
@@ -662,6 +776,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       // Create the transaction
@@ -697,6 +812,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       const tx = this.api.tx.reputation.verifyContribution(
@@ -728,6 +844,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       // Create vote transaction
@@ -760,6 +877,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       // Create proposal transaction based on type
@@ -812,28 +930,45 @@ export class PolkadotApiService {
     callback: (event: any) => void
   ): Promise<() => void> {
     await this.ensureConnected();
+    if (!this.api) throw new Error('API not connected');
 
-    const unsub = await this.api!.query.system.events((events: any) => {
-      events.forEach((record: any) => {
-        const { event } = record;
-        callback({
-          section: event?.section?.toString() || '',
-          method: event?.method?.toString() || '',
-          data: event?.data?.toHuman ? event.data.toHuman() : event?.data,
-          phase: record?.phase?.toString() || '',
-          topics: (record?.topics || []).map((t: any) => t?.toString() || String(t))
+    const unsub = await this.api.query.system.events((events: any) => {
+      if (events && Array.isArray(events)) {
+        events.forEach((record: any) => {
+          const { event } = record || {};
+          if (event) {
+            callback({
+              section: event?.section?.toString() || '',
+              method: event?.method?.toString() || '',
+              data: event?.data?.toHuman ? event.data.toHuman() : event?.data,
+              phase: record?.phase?.toString() || '',
+              topics: (record?.topics || []).map((t: any) => t?.toString() || String(t))
+            });
+          }
         });
-      });
+      }
     });
 
     const subscriptionId = `events-${Date.now()}`;
-    this.eventSubscriptions.set(subscriptionId, unsub as () => void);
+    // Store unsubscribe function with proper type handling
+    const unsubscribeFn: () => void = typeof unsub === 'function' 
+      ? unsub 
+      : () => { 
+          try {
+            if (unsub && typeof (unsub as any) === 'function') {
+              (unsub as any)();
+            } else if (unsub && typeof (unsub as any).then === 'function') {
+              (unsub as any).then((fn: () => void) => fn?.());
+            }
+          } catch (e) {
+            console.warn('Error unsubscribing:', e);
+          }
+        };
+    this.eventSubscriptions.set(subscriptionId, unsubscribeFn);
 
     return () => {
-      if (unsub) {
-        (unsub as any)();
-        this.eventSubscriptions.delete(subscriptionId);
-      }
+      unsubscribeFn();
+      this.eventSubscriptions.delete(subscriptionId);
     };
   }
 
@@ -890,10 +1025,18 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const blockHash = await this.api.rpc.chain.getBlockHash();
+      if (!blockHash) {
+        return { status: "unknown", error: "Block hash not found" };
+      }
       const signedBlock = await this.api.rpc.chain.getBlock(blockHash);
+      if (!signedBlock || !signedBlock.block || !signedBlock.block.header) {
+        return { status: "unknown", error: "Block not found" };
+      }
       
       // Check if transaction is in block
       const txHash = this.api.createType("Hash", hash);
@@ -923,6 +1066,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       const tx = this.api.tx.trustLayer.postClaim(
@@ -953,6 +1097,7 @@ export class PolkadotApiService {
     if (!this.api) {
       await this.connect();
     }
+    if (!this.api) throw new Error('API not connected');
 
     try {
       const tx = this.api.tx.trustLayer.challengeClaim(
@@ -994,13 +1139,15 @@ export class PolkadotApiService {
     }
 
     try {
+      if (!this.api) throw new Error('API not connected');
       const claim = await this.api.query.trustLayer.claim(claimId);
+      const claimCodec = claim as any;
       
-      if (claim.isNone) {
+      if (!claimCodec || (claimCodec.isNone !== undefined && claimCodec.isNone)) {
         return null;
       }
 
-      const claimData = claim.unwrap();
+      const claimData = claimCodec.unwrap ? claimCodec.unwrap() : claimCodec;
       // Convert UAL from bytes to string
       const convertUAL = (ual: any): string => {
         if (typeof ual === 'string') return ual;
@@ -1061,9 +1208,15 @@ export class PolkadotApiService {
           if (!this.api) {
             await this.connect();
           }
+          if (!this.api) throw new Error('API not connected');
           const staked = await this.api.query.trustLayer.stakedAmount(accountId);
-          stakedAmount = staked.toString();
-          hasStake = staked.gte(this.api.createType('Balance', minStake));
+          const stakedCodec = staked as any;
+          if (stakedCodec) {
+            stakedAmount = stakedCodec.toString();
+            const minBalance = this.api.createType('Balance', minStake);
+            hasStake = stakedCodec.gte ? stakedCodec.gte(minBalance) : 
+                      (BigInt(stakedAmount) >= BigInt(minStake));
+          }
         } catch (error) {
           console.warn("[Polkadot API] Error checking stake:", error);
         }
@@ -1074,9 +1227,15 @@ export class PolkadotApiService {
       try {
         if (this.api) {
           const accessExpiry = await this.api.query.trustLayer.queryAccess(accountId, ual);
-          if (!accessExpiry.isNone) {
+          const accessExpiryCodec = accessExpiry as any;
+          if (accessExpiryCodec && 
+              (accessExpiryCodec.isNone === undefined || !accessExpiryCodec.isNone)) {
+            const expiryValue = accessExpiryCodec.unwrap ? 
+                               accessExpiryCodec.unwrap() : accessExpiryCodec;
             const currentBlock = await this.getCurrentBlock();
-            hasPaymentAccess = accessExpiry.unwrap().toNumber() >= currentBlock;
+            const expiryBlock = expiryValue?.toNumber ? expiryValue.toNumber() : 
+                               (typeof expiryValue === 'number' ? expiryValue : 0);
+            hasPaymentAccess = expiryBlock >= currentBlock;
           }
         }
       } catch (error) {
@@ -1166,7 +1325,9 @@ export class PolkadotApiService {
       // For demo, we'll check if UAL indicates a flag (contains 'flag' or 'match')
       const isFlagged = verificationUAL.includes('flag') || verificationUAL.includes('match');
       const confidence = 0.85; // Mock confidence
-      const matchType = 'deepfake'; // Mock match type
+      const matchType: string = verificationUAL.includes('csam') ? 'csam' : 
+                                 verificationUAL.includes('illicit') ? 'illicit' : 
+                                 'deepfake'; // Mock match type
 
       // Slashing criteria:
       // - High confidence (>0.85)

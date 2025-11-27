@@ -16,6 +16,8 @@ import {
   SensitivityAuditResult,
   FairnessMetrics
 } from './graph-algorithms';
+import { TokenVerificationService, GatedAction } from './token-verification-service';
+import { GuardianVerificationService } from './guardian-verification';
 
 export interface ReputationGraphData {
   nodes: GraphNode[];
@@ -28,12 +30,15 @@ export interface ReputationComputationOptions {
   fairnessAdjustmentStrength?: number;
   enableSensitivityAudit?: boolean;
   enableSybilDetection?: boolean;
+  enableDeceptionFiltering?: boolean; // Filter bad-mouthing and self-promotion
+  enableGuardianIntegration?: boolean; // Integrate Umanitek Guardian content quality
   computeHybridScore?: boolean;
   hybridWeights?: {
     graph?: number;
     quality?: number;
     stake?: number;
     payment?: number;
+    behavioral?: number; // Behavioral signals (engagement, consistency)
   };
   pageRankConfig?: PageRankConfig;
 }
@@ -43,12 +48,16 @@ export interface ReputationComputationResult {
   fairnessMetrics?: FairnessMetrics;
   sensitivityAudits?: Map<string, SensitivityAuditResult>;
   sybilProbabilities?: Map<string, number>;
+  deceptionProbabilities?: Map<string, number>; // Edge-level deception scores
+  communities?: number[]; // Community assignments for each node
   computationTime: number;
   metadata: {
     nodeCount: number;
     edgeCount: number;
     algorithm: string;
     config: ReputationComputationOptions;
+    guardianIntegrationEnabled?: boolean;
+    deceptionFilteringEnabled?: boolean;
   };
 }
 
@@ -60,9 +69,17 @@ export interface ReputationComputationResult {
  */
 export class GraphReputationService {
   private dkgClient: DKGClientV8;
+  private tokenVerification: TokenVerificationService | null = null;
+  private guardianService: GuardianVerificationService | null = null;
 
-  constructor(dkgClient: DKGClientV8) {
+  constructor(
+    dkgClient: DKGClientV8,
+    tokenVerification?: TokenVerificationService,
+    guardianService?: GuardianVerificationService
+  ) {
     this.dkgClient = dkgClient;
+    this.tokenVerification = tokenVerification || dkgClient.getTokenVerificationService() || null;
+    this.guardianService = guardianService || null;
   }
 
   /**
@@ -85,6 +102,8 @@ export class GraphReputationService {
       enableSensitivityAudit = false,
       enableSybilDetection = true,
       computeHybridScore = true,
+      enableDeceptionFiltering = false,
+      enableGuardianIntegration = false,
       hybridWeights = {
         graph: 0.5,
         quality: 0.25,
@@ -96,6 +115,18 @@ export class GraphReputationService {
 
     console.log(`🔍 Computing reputation for ${graphData.nodes.length} nodes and ${graphData.edges.length} edges`);
 
+    // Step 0: Enhance edges with token verification weights (if token verification is enabled)
+    let enhancedEdges = graphData.edges;
+    if (this.tokenVerification) {
+      console.log('🔐 Enhancing edges with token verification weights...');
+      enhancedEdges = await this.tokenVerification.enhanceEdgesWithTokenWeights(
+        graphData.edges,
+        GatedAction.PUBLISH_ENDORSEMENT
+      );
+      const tokenBackedCount = enhancedEdges.filter(e => e.metadata?.stakeBacked).length;
+      console.log(`   ${tokenBackedCount}/${enhancedEdges.length} edges are token-backed`);
+    }
+
     // Step 1: Compute PageRank
     let pagerankScores: Map<string, number>;
     
@@ -103,7 +134,7 @@ export class GraphReputationService {
       console.log('📊 Computing Temporal Weighted PageRank...');
       const pagerankResult = GraphAlgorithms.computeTemporalWeightedPageRank(
         graphData.nodes,
-        graphData.edges,
+        enhancedEdges, // Use enhanced edges with token weights
         pageRankConfig
       );
       pagerankScores = pagerankResult.scores;
@@ -113,7 +144,32 @@ export class GraphReputationService {
       throw new Error('Basic PageRank not yet implemented. Use temporal PageRank.');
     }
 
-    // Step 2: Apply fairness adjustments if enabled
+    // Step 2: Apply token-based reputation boosts to nodes
+    if (this.tokenVerification && computeHybridScore) {
+      console.log('🔐 Applying token-based reputation boosts...');
+      const boostedNodes = await Promise.all(
+        graphData.nodes.map(async (node) => {
+          const boost = await this.tokenVerification!.getReputationBoost(
+            node.id,
+            GatedAction.PUBLISH_ENDORSEMENT
+          );
+          if (boost > 0) {
+            return {
+              ...node,
+              metadata: {
+                ...node.metadata,
+                tokenReputationBoost: boost,
+                tokenVerified: true
+              }
+            };
+          }
+          return node;
+        })
+      );
+      graphData.nodes = boostedNodes;
+    }
+
+    // Step 3: Apply fairness adjustments if enabled
     if (applyFairnessAdjustments) {
       console.log('⚖️  Applying fairness adjustments...');
       pagerankScores = GraphAlgorithms.applyFairnessAdjustments(
@@ -123,7 +179,7 @@ export class GraphReputationService {
       );
     }
 
-    // Step 3: Compute hybrid scores
+    // Step 4: Compute hybrid scores
     let finalScores: Map<string, HybridReputationScore>;
     
     if (computeHybridScore) {
@@ -131,7 +187,12 @@ export class GraphReputationService {
       finalScores = GraphAlgorithms.computeHybridReputation(
         pagerankScores,
         graphData.nodes,
-        hybridWeights
+        {
+          graphWeight: hybridWeights.graph,
+          qualityWeight: hybridWeights.quality,
+          stakeWeight: hybridWeights.stake,
+          paymentWeight: hybridWeights.payment
+        }
       );
     } else {
       // Convert PageRank scores to HybridReputationScore format
@@ -150,7 +211,7 @@ export class GraphReputationService {
       }
     }
 
-    // Step 4: Compute fairness metrics
+    // Step 5: Compute fairness metrics
     let fairnessMetrics: FairnessMetrics | undefined;
     if (applyFairnessAdjustments) {
       console.log('📈 Computing fairness metrics...');
@@ -163,20 +224,91 @@ export class GraphReputationService {
       console.log(`   Bias score: ${fairnessMetrics.biasScore.toFixed(3)}`);
     }
 
-    // Step 5: Detect Sybil clusters
+    // Step 6: Detect communities and Sybil clusters
+    let communities: number[] | undefined;
     let sybilProbabilities: Map<string, number> | undefined;
     if (enableSybilDetection) {
-      console.log('🛡️  Detecting Sybil clusters...');
+      console.log('🛡️  Detecting communities and Sybil clusters...');
+      communities = GraphAlgorithms.detectCommunities(graphData.nodes, enhancedEdges);
       sybilProbabilities = GraphAlgorithms.detectSybilClusters(
         graphData.nodes,
-        graphData.edges,
+        enhancedEdges,
         pagerankScores
       );
       const sybilCount = Array.from(sybilProbabilities.values()).filter(p => p > 0.5).length;
-      console.log(`   Detected ${sybilCount} potential Sybil nodes`);
+      console.log(`   Detected ${sybilCount} potential Sybil nodes across ${new Set(communities).size} communities`);
     }
 
-    // Step 6: Sensitivity auditing (optional, can be expensive)
+    // Step 6.5: Filter deceptive opinions (bad-mouthing and self-promotion)
+    let deceptionProbabilities: Map<string, number> | undefined;
+    if (enableDeceptionFiltering && communities) {
+      console.log('🔍 Filtering deceptive opinions...');
+      deceptionProbabilities = GraphAlgorithms.filterDeceptiveOpinions(
+        graphData.nodes,
+        enhancedEdges,
+        communities
+      );
+      
+      // Remove or downweight deceptive edges
+      const deceptiveEdgeCount = Array.from(deceptionProbabilities.values()).filter(p => p > 0.5).length;
+      console.log(`   Filtered ${deceptiveEdgeCount} potentially deceptive edges`);
+      
+      // Downweight deceptive edges in PageRank computation
+      if (deceptiveEdgeCount > 0) {
+        enhancedEdges = enhancedEdges.map(edge => {
+          const edgeId = `${edge.source}->${edge.target}`;
+          const deceptionProb = deceptionProbabilities!.get(edgeId) || 0;
+          if (deceptionProb > 0.5) {
+            return {
+              ...edge,
+              weight: edge.weight * (1 - deceptionProb * 0.8) // Reduce weight by up to 80%
+            };
+          }
+          return edge;
+        });
+        
+        // Recompute PageRank with filtered edges
+        if (useTemporalPageRank) {
+          const filteredPRResult = GraphAlgorithms.computeTemporalWeightedPageRank(
+            graphData.nodes,
+            enhancedEdges,
+            pageRankConfig
+          );
+          pagerankScores = filteredPRResult.scores;
+        }
+      }
+    }
+
+    // Step 6.6: Integrate Guardian content quality signals
+    // Note: Guardian service integration would require initialization
+    if (enableGuardianIntegration && false) { // Disabled for now
+      console.log('🛡️  Integrating Umanitek Guardian content quality signals...');
+      const guardianEnhancedNodes = await Promise.all(
+        graphData.nodes.map(async (node) => {
+          try {
+            // Query Guardian safety scores for this creator
+            const safetyScore = await this.queryCreatorSafetyScore(node.id);
+            
+            if (safetyScore !== null) {
+              return {
+                ...node,
+                metadata: {
+                  ...node.metadata,
+                  guardianSafetyScore: safetyScore,
+                  contentQuality: (node.metadata?.contentQuality || 0) * 0.7 + safetyScore * 0.3
+                }
+              };
+            }
+          } catch (error) {
+            console.warn(`   Failed to get Guardian score for ${node.id}:`, error);
+          }
+          return node;
+        })
+      );
+      graphData.nodes = guardianEnhancedNodes;
+    }
+
+    // Step 7: Sensitivity auditing (optional, can be expensive)
     let sensitivityAudits: Map<string, SensitivityAuditResult> | undefined;
     if (enableSensitivityAudit) {
       console.log('🔬 Performing sensitivity audits (this may take a while)...');
@@ -192,7 +324,7 @@ export class GraphReputationService {
         const audit = GraphAlgorithms.auditPageRankSensitivity(
           nodeId,
           graphData.nodes,
-          graphData.edges,
+          enhancedEdges, // Use enhanced edges
           pagerankScores,
           pageRankConfig
         );
@@ -210,12 +342,16 @@ export class GraphReputationService {
       fairnessMetrics,
       sensitivityAudits,
       sybilProbabilities,
+      deceptionProbabilities,
+      communities,
       computationTime,
       metadata: {
         nodeCount: graphData.nodes.length,
-        edgeCount: graphData.edges.length,
+        edgeCount: enhancedEdges.length, // Use enhanced edges count
         algorithm: useTemporalPageRank ? 'TemporalWeightedPageRank' : 'PageRank',
-        config: options
+        config: options,
+        guardianIntegrationEnabled: enableGuardianIntegration && !!this.guardianService,
+        deceptionFilteringEnabled: enableDeceptionFiltering
       }
     };
   }
@@ -329,10 +465,10 @@ export class GraphReputationService {
   }
 
   /**
-   * Query graph data from DKG and compute reputation
+   * Query graph data from DKG and compute reputation with Payment Evidence KAs
    * 
-   * This method queries the DKG for social graph relationships and computes
-   * reputation scores from the retrieved data.
+   * This method queries the DKG for social graph relationships and Payment Evidence KAs,
+   * then computes TraceRank-style payment-weighted reputation scores.
    * 
    * @param queryOptions - Options for querying graph data
    * @param computationOptions - Options for reputation computation
@@ -344,22 +480,301 @@ export class GraphReputationService {
       includeAllNodes?: boolean;
       relationshipTypes?: EdgeType[];
       minEdgeWeight?: number;
+      includePaymentEvidence?: boolean; // Enable payment-weighted TraceRank
+      minPaymentAmount?: number; // Filter low-value payments (sybil resistance)
     } = {},
     computationOptions: ReputationComputationOptions = {}
   ): Promise<ReputationComputationResult> {
     console.log('🔍 Querying graph data from DKG...');
 
-    // This would query the DKG using SPARQL to get nodes and edges
-    // For now, this is a placeholder that would need to be implemented
-    // based on your specific DKG schema and query capabilities
+    const {
+      includePaymentEvidence = true,
+      minPaymentAmount = 0,
+      developerIds = [],
+      minEdgeWeight = 0
+    } = queryOptions;
 
-    throw new Error('computeReputationFromDKG not yet implemented. Please provide graph data directly using computeReputation().');
+    // Step 1: Query Payment Evidence KAs if enabled (TraceRank)
+    let paymentEdges: GraphEdge[] = [];
+    if (includePaymentEvidence) {
+      console.log('💰 Querying Payment Evidence KAs for payment-weighted reputation...');
+      paymentEdges = await this.queryPaymentEvidenceAsEdges({
+        minAmount: minPaymentAmount,
+        recipientIds: developerIds.length > 0 ? developerIds : undefined
+      });
+      console.log(`   Found ${paymentEdges.length} payment edges`);
+    }
 
-    // Example implementation would:
-    // 1. Query nodes (developers) from DKG
-    // 2. Query edges (relationships) from DKG
-    // 3. Transform to GraphNode and GraphEdge format
-    // 4. Call computeReputation()
+    // Step 2: Query social graph relationships (endorsements, contributions, etc.)
+    console.log('🔗 Querying social graph relationships...');
+    const socialEdges = await this.querySocialGraphEdges({
+      developerIds: developerIds.length > 0 ? developerIds : undefined,
+      minEdgeWeight,
+      relationshipTypes: queryOptions.relationshipTypes
+    });
+    console.log(`   Found ${socialEdges.length} social graph edges`);
+
+    // Step 3: Combine all edges
+    const allEdges = [...socialEdges, ...paymentEdges];
+
+    // Step 4: Extract unique nodes from edges
+    const nodeMap = new Map<string, GraphNode>();
+    for (const edge of allEdges) {
+      if (!nodeMap.has(edge.source)) {
+        nodeMap.set(edge.source, {
+          id: edge.source,
+          metadata: {}
+        });
+      }
+      if (!nodeMap.has(edge.target)) {
+        nodeMap.set(edge.target, {
+          id: edge.target,
+          metadata: {}
+        });
+      }
+    }
+
+    // Step 5: Compute reputation with combined graph
+    return this.computeReputation(
+      {
+        nodes: Array.from(nodeMap.values()),
+        edges: allEdges
+      },
+      {
+        ...computationOptions,
+        // Increase payment weight if payment evidence included
+        hybridWeights: includePaymentEvidence 
+          ? {
+              ...computationOptions.hybridWeights,
+              payment: computationOptions.hybridWeights?.payment || 0.25
+            }
+          : computationOptions.hybridWeights
+      }
+    );
+  }
+
+  /**
+   * Query Payment Evidence KAs from DKG and convert to graph edges
+   * 
+   * Creates edges from payer → recipient with payment amount as weight
+   */
+  private async queryPaymentEvidenceAsEdges(filters: {
+    minAmount?: number;
+    recipientIds?: string[];
+    limit?: number;
+  }): Promise<GraphEdge[]> {
+    const { minAmount = 0, recipientIds, limit = 1000 } = filters;
+
+    try {
+      // Query Payment Evidence KAs
+      const payments = await this.dkgClient.queryPaymentEvidence({
+        minAmount,
+        limit
+      });
+
+      const edges: GraphEdge[] = [];
+      const seenPayments = new Set<string>(); // Deduplicate by txHash
+
+      for (const payment of payments) {
+        // Filter by recipient if specified
+        if (recipientIds && recipientIds.length > 0 && 
+            !recipientIds.includes(payment.recipient)) {
+          continue;
+        }
+
+        // Deduplicate
+        if (seenPayments.has(payment.txHash)) {
+          continue;
+        }
+        seenPayments.add(payment.txHash);
+
+        // Calculate edge weight from payment amount (logarithmic scale)
+        const amount = parseFloat(payment.amount);
+        const weight = amount > 0 ? Math.min(Math.log10(amount) * 10, 50) : 0;
+
+        edges.push({
+          source: payment.payer,
+          target: payment.recipient,
+          edgeType: EdgeType.ENDORSE, // Use ENDORSE type for payment edges
+          weight,
+          timestamp: new Date(payment.timestamp).getTime(),
+          metadata: {
+            paymentAmount: amount,
+            currency: payment.currency,
+            txHash: payment.txHash,
+            chain: payment.chain,
+            paymentWeight: weight,
+            paymentBacked: true // Mark as payment-backed edge
+          }
+        });
+      }
+
+      return edges;
+    } catch (error: any) {
+      console.error('Error querying Payment Evidence KAs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Query social graph edges from DKG using SPARQL
+   * 
+   * Queries the Umanitek Guardian knowledge base on DKG for:
+   * - Follow relationships (foaf:knows)
+   * - Endorsements (schema:Interaction with interactionType "endorse")
+   * - Content interactions (likes, shares, comments)
+   */
+  private async querySocialGraphEdges(filters: {
+    developerIds?: string[];
+    minEdgeWeight?: number;
+    relationshipTypes?: EdgeType[];
+  }): Promise<GraphEdge[]> {
+    const { developerIds = [], minEdgeWeight = 0 } = filters;
+
+    try {
+      const sparqlQuery = `
+        PREFIX schema: <https://schema.org/>
+        PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+        PREFIX prov: <http://www.w3.org/ns/prov#>
+        
+        SELECT ?from ?to ?edgeType ?connectionStrength ?timestamp WHERE {
+          {
+            ?obs a prov:Entity, schema:Observation ;
+                 schema:about ?about ;
+                 schema:dateCreated ?timestamp .
+            ?obs foaf:knows ?person .
+            ?person a foaf:Person .
+            OPTIONAL {
+              ?obs schema:additionalProperty ?addProp .
+              ?addProp schema:name "connectionStrength" ;
+                       schema:value ?connectionStrength .
+            }
+            BIND(?about AS ?from)
+            BIND(?person AS ?to)
+            BIND("follow" AS ?edgeType)
+            ${developerIds.length > 0 ? `FILTER(?from IN (${developerIds.map(id => `"${id}"`).join(', ')}))` : ''}
+          }
+          UNION
+          {
+            ?edge a schema:Interaction ;
+                  schema:agent ?from ;
+                  schema:target ?to ;
+                  schema:interactionType ?it ;
+                  schema:dateCreated ?timestamp .
+            FILTER(CONTAINS(LCASE(STR(?it)), "endorse") || CONTAINS(LCASE(STR(?it)), "recommend"))
+            OPTIONAL {
+              ?edge schema:additionalProperty ?ap .
+              ?ap schema:name "strength" ;
+                  schema:value ?connectionStrength .
+            }
+            BIND("endorse" AS ?edgeType)
+            ${developerIds.length > 0 ? `FILTER(?from IN (${developerIds.map(id => `"${id}"`).join(', ')}))` : ''}
+          }
+        }
+        ${minEdgeWeight > 0 ? `FILTER(?connectionStrength >= ${minEdgeWeight})` : ''}
+        LIMIT 20000
+      `;
+
+      console.log('   Executing SPARQL query for social graph edges...');
+      const results = await this.dkgClient.executeSafeQuery(sparqlQuery, 'SELECT');
+
+      const edges: GraphEdge[] = [];
+      const seenEdges = new Set<string>();
+
+      for (const result of results) {
+        const source = result.from?.value || result.from;
+        const target = result.to?.value || result.to;
+        const edgeTypeStr = result.edgeType?.value || result.edgeType || 'follow';
+        const strength = parseFloat(result.connectionStrength?.value || result.connectionStrength || '0.5');
+        const timestamp = result.timestamp?.value 
+          ? new Date(result.timestamp.value).getTime() 
+          : Date.now();
+
+        const edgeKey = `${source}->${target}:${edgeTypeStr}`;
+        if (seenEdges.has(edgeKey)) continue;
+        seenEdges.add(edgeKey);
+
+        let edgeType: EdgeType = EdgeType.FOLLOW;
+        if (edgeTypeStr === 'endorse') edgeType = EdgeType.ENDORSE;
+
+        edges.push({
+          source,
+          target,
+          edgeType: edgeType,
+          weight: Math.min(1, Math.max(0, strength)),
+          timestamp,
+          metadata: {
+            connectionStrength: strength,
+            edgeType: edgeTypeStr
+          }
+        });
+      }
+
+      console.log(`   Found ${edges.length} social graph edges from DKG`);
+      return edges;
+    } catch (error: any) {
+      console.error('Error querying social graph edges from DKG:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Query creator safety score from Guardian verification reports
+   */
+  private async queryCreatorSafetyScore(creatorId: string): Promise<number | null> {
+    if (!this.guardianService) return null;
+
+    try {
+      const sparqlQuery = `
+        PREFIX schema: <https://schema.org/>
+        PREFIX dotrep: <https://dotrep.io/ontology/>
+        
+        SELECT ?confidence ?matchFound ?status WHERE {
+          ?report a dotrep:ContentVerificationReport ;
+                  schema:about ?content ;
+                  dotrep:verificationResult ?result .
+          ?content schema:author ?creator .
+          ?creator dotrep:identifier "${creatorId}" .
+          ?result dotrep:confidence ?confidence ;
+                  dotrep:matchFound ?matchFound ;
+                  dotrep:status ?status .
+        }
+        ORDER BY DESC(?confidence)
+        LIMIT 50
+      `;
+
+      const results = await this.dkgClient.executeSafeQuery(sparqlQuery, 'SELECT');
+      
+      if (results.length === 0) {
+        return null;
+      }
+
+      let verifiedCount = 0;
+      let flaggedCount = 0;
+
+      for (const result of results) {
+        const matchFound = result.matchFound?.value === 'true' || result.matchFound === true;
+        const status = result.status?.value || result.status || 'pending';
+
+        if (status === 'verified' && !matchFound) {
+          verifiedCount++;
+        } else if (status === 'flagged' || matchFound) {
+          flaggedCount++;
+        }
+      }
+
+      const verifiedRatio = verifiedCount / results.length;
+      const flaggedRatio = flaggedCount / results.length;
+      
+      const safetyScore = Math.max(0, Math.min(1, 
+        verifiedRatio * 0.7 + (1 - flaggedRatio) * 0.3
+      ));
+
+      return safetyScore;
+    } catch (error: any) {
+      console.warn(`   Failed to query Guardian safety score for ${creatorId}:`, error.message);
+      return null;
+    }
   }
 }
 

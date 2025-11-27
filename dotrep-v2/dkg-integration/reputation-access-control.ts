@@ -12,6 +12,7 @@
 import { PolkadotApiService } from '../server/_core/polkadotApi';
 import { ProvenanceRegistry, ProvenanceInfo } from './provenance-registry';
 import { getImpactMetrics } from '../server/_core/impactMetrics';
+import { TokenVerificationService, GatedAction } from './token-verification-service';
 
 export interface AccessPolicy {
   ual: string;
@@ -48,14 +49,17 @@ export class ReputationAccessControl {
   private provenanceRegistry: ProvenanceRegistry;
   private accessPolicies: Map<string, AccessPolicy> = new Map();
   private impactMetrics: ReturnType<typeof getImpactMetrics>;
+  private tokenVerification: TokenVerificationService | null = null;
 
   constructor(
     polkadotApi: PolkadotApiService,
-    provenanceRegistry?: ProvenanceRegistry
+    provenanceRegistry?: ProvenanceRegistry,
+    tokenVerification?: TokenVerificationService
   ) {
     this.polkadotApi = polkadotApi;
     this.provenanceRegistry = provenanceRegistry || new ProvenanceRegistry();
     this.impactMetrics = getImpactMetrics();
+    this.tokenVerification = tokenVerification || null;
   }
 
   /**
@@ -105,24 +109,47 @@ export class ReputationAccessControl {
       };
     }
 
-    // Check stake requirement
+    // Check stake requirement (via Polkadot API or token verification)
     let hasStakeAccess = true;
     if (policy.minStake) {
-      const accessCheck = await this.polkadotApi.hasReputationBackedAccess(
-        accountId,
-        ual,
-        policy.minReputation,
-        policy.minStake
-      );
-      hasStakeAccess = accessCheck.stakedAmount
-        ? BigInt(accessCheck.stakedAmount) >= BigInt(policy.minStake)
-        : false;
+      // First try token verification if available (more flexible)
+      if (this.tokenVerification) {
+        const tokenAccess = await this.tokenVerification.checkActionAccess(
+          accountId,
+          GatedAction.ACCESS_PREMIUM
+        );
+        if (tokenAccess.allowed) {
+          hasStakeAccess = true;
+        } else {
+          // Fallback to Polkadot API check
+          const accessCheck = await this.polkadotApi.hasReputationBackedAccess(
+            accountId,
+            ual,
+            policy.minReputation,
+            policy.minStake
+          );
+          hasStakeAccess = accessCheck.stakedAmount
+            ? BigInt(accessCheck.stakedAmount) >= BigInt(policy.minStake)
+            : false;
+        }
+      } else {
+        // Use Polkadot API only
+        const accessCheck = await this.polkadotApi.hasReputationBackedAccess(
+          accountId,
+          ual,
+          policy.minReputation,
+          policy.minStake
+        );
+        hasStakeAccess = accessCheck.stakedAmount
+          ? BigInt(accessCheck.stakedAmount) >= BigInt(policy.minStake)
+          : false;
+      }
     }
 
     if (!hasStakeAccess) {
       return {
         granted: false,
-        reason: `Insufficient stake. Required: ${policy.minStake}`,
+        reason: `Insufficient stake or token ownership. Required: ${policy.minStake}`,
         paymentRequired: false
       };
     }
