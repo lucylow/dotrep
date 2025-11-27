@@ -30,14 +30,14 @@ export default function DashboardImproved() {
     { enabled: !!contributor }
   );
 
-  const { data: achievements = [] } = trpc.achievement.list.useQuery(
-    { contributorId: contributor?.id || 0 },
-    { enabled: !!contributor }
+  const { data: achievements = [] } = trpc.achievement.getByContributor.useQuery(
+    { id: contributor?.id || 0 },
+    { enabled: !!contributor && !!contributor.id }
   );
 
   // Calculate stats
   const stats = {
-    totalScore: contributor?.totalReputationScore || 0,
+    totalScore: contributor?.reputationScore || 0,
     contributions: allContributions.length,
     verified: allContributions.filter((c: any) => c.verified).length,
     achievements: achievements.length,

@@ -10,7 +10,7 @@ interface QuickStatsProps {
 
 export const QuickStats: React.FC<QuickStatsProps> = ({ profile, contributions = [] }) => {
   const stats = {
-    totalScore: profile?.totalReputationScore || 0,
+    totalScore: profile?.reputationScore || 0,
     contributions: contributions.length,
     verified: contributions.filter((c: any) => c.verified).length,
     achievements: profile?.achievements?.length || 0,

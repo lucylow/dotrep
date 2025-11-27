@@ -1,38 +1,193 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Shield, TrendingUp, Award, GitCommit, GitPullRequest, MessageSquare, FileCode } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Shield, TrendingUp, Award, GitCommit, GitPullRequest, MessageSquare, FileCode, Search, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Navbar } from "@/components/layout/Navbar";
+import { UnifiedSidebar } from "@/components/layout/UnifiedSidebar";
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { useDotRepWallet } from "@/_core/hooks/useDotRepWallet";
+import { toast } from "sonner";
+import { Link } from "wouter";
 
 export default function ReputationPage() {
+  const [accountId, setAccountId] = useState("");
+  const [threshold, setThreshold] = useState("100");
+  const { connectionResult } = useDotRepWallet();
+  
+  // Use connected wallet address if available
+  const queryAccountId = accountId || connectionResult?.address || "";
+  
+  const reputationQuery = trpc.polkadot.reputation.get.useQuery(
+    { accountId: queryAccountId },
+    { enabled: !!queryAccountId }
+  );
+  
+  const contributionCountQuery = trpc.polkadot.reputation.getContributionCount.useQuery(
+    { accountId: queryAccountId },
+    { enabled: !!queryAccountId }
+  );
+  
+  const hasSufficientQuery = trpc.polkadot.reputation.hasSufficient.useQuery(
+    { accountId: queryAccountId, threshold: parseFloat(threshold) || 100 },
+    { enabled: !!queryAccountId && !!threshold }
+  );
+  
+  const previewQuery = trpc.polkadot.reputation.preview.useQuery(
+    { accountId: queryAccountId },
+    { enabled: !!queryAccountId }
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#F8F7FF] to-white">
-      <Navbar />
+    <UnifiedSidebar>
+      <div className="min-h-screen bg-gradient-to-b from-[#F8F7FF] to-white p-6">
 
-      <div className="container mx-auto px-4 py-12">
-        <div className="max-w-5xl mx-auto">
-          <h1 className="text-5xl font-extrabold text-[#131313] mb-4">Reputation System</h1>
-          <p className="text-xl text-[#4F4F4F] mb-12">
-            How we calculate and verify your open source reputation score
-          </p>
+        <div className="container mx-auto px-4 py-12">
+          <div className="max-w-5xl mx-auto">
+            <h1 className="text-5xl font-extrabold text-[#131313] mb-4">Reputation System</h1>
+            <p className="text-xl text-[#4F4F4F] mb-12">
+              How we calculate and verify your open source reputation score
+            </p>
 
-          {/* Score Breakdown */}
-          <div className="grid md:grid-cols-3 gap-6 mb-12">
-            <Card className="p-8 rounded-2xl border-2 border-[#6C3CF0] bg-gradient-to-br from-[#FBF9FF] to-white">
-              <TrendingUp className="w-12 h-12 text-[#6C3CF0] mb-4" />
-              <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">1,250</div>
-              <div className="text-[#4F4F4F]">Total Reputation Score</div>
+            {/* Reputation Query Section */}
+            <Card className="p-6 mb-8 rounded-2xl border-2 border-[#6C3CF0]">
+              <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                <Search className="w-6 h-6" />
+                Query Reputation
+              </h2>
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="accountId">Account ID</Label>
+                  <Input
+                    id="accountId"
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    placeholder={connectionResult?.address || "Enter account ID or connect wallet"}
+                    className="mt-1 font-mono"
+                  />
+                  {connectionResult?.address && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Connected: {connectionResult.address.slice(0, 20)}...
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label htmlFor="threshold">Reputation Threshold</Label>
+                  <Input
+                    id="threshold"
+                    type="number"
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    placeholder="100"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
             </Card>
-            <Card className="p-8 rounded-2xl border-2 border-gray-100">
-              <Award className="w-12 h-12 text-[#3DD68C] mb-4" />
-              <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">42</div>
-              <div className="text-[#4F4F4F]">Verified Contributions</div>
-            </Card>
-            <Card className="p-8 rounded-2xl border-2 border-gray-100">
-              <Shield className="w-12 h-12 text-[#A074FF] mb-4" />
-              <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">98%</div>
-              <div className="text-[#4F4F4F]">Verification Rate</div>
-            </Card>
-          </div>
+
+            {/* Live Reputation Data */}
+            {queryAccountId && (
+              <div className="grid md:grid-cols-2 gap-6 mb-12">
+                {reputationQuery.isLoading ? (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <Loader2 className="w-12 h-12 text-[#6C3CF0] mb-4 animate-spin mx-auto" />
+                    <div className="text-[#4F4F4F] text-center">Loading reputation...</div>
+                  </Card>
+                ) : reputationQuery.data ? (
+                  <Card className="p-8 rounded-2xl border-2 border-[#6C3CF0] bg-gradient-to-br from-[#FBF9FF] to-white">
+                    <TrendingUp className="w-12 h-12 text-[#6C3CF0] mb-4" />
+                    <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">
+                      {reputationQuery.data.overall.toLocaleString()}
+                    </div>
+                    <div className="text-[#4F4F4F] mb-2">Total Reputation Score</div>
+                    {reputationQuery.data.percentile !== undefined && (
+                      <Badge variant="outline" className="mt-2">
+                        {reputationQuery.data.percentile}th percentile
+                      </Badge>
+                    )}
+                  </Card>
+                ) : (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <XCircle className="w-12 h-12 text-red-500 mb-4" />
+                    <div className="text-[#4F4F4F]">No reputation data found</div>
+                  </Card>
+                )}
+
+                {contributionCountQuery.isLoading ? (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <Loader2 className="w-12 h-12 text-[#3DD68C] mb-4 animate-spin mx-auto" />
+                    <div className="text-[#4F4F4F] text-center">Loading contributions...</div>
+                  </Card>
+                ) : contributionCountQuery.data !== undefined ? (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <Award className="w-12 h-12 text-[#3DD68C] mb-4" />
+                    <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">
+                      {contributionCountQuery.data}
+                    </div>
+                    <div className="text-[#4F4F4F]">Verified Contributions</div>
+                  </Card>
+                ) : null}
+
+                {hasSufficientQuery.data !== undefined && (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <Shield className="w-12 h-12 text-[#A074FF] mb-4" />
+                    <div className="flex items-center gap-2 mb-2">
+                      {hasSufficientQuery.data ? (
+                        <>
+                          <CheckCircle2 className="w-6 h-6 text-green-500" />
+                          <div className="text-2xl font-bold text-green-600">Sufficient</div>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-6 h-6 text-red-500" />
+                          <div className="text-2xl font-bold text-red-600">Insufficient</div>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-[#4F4F4F]">
+                      Reputation {hasSufficientQuery.data ? "meets" : "below"} threshold of {threshold}
+                    </div>
+                  </Card>
+                )}
+
+                {previewQuery.data && (
+                  <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                    <Award className="w-12 h-12 text-[#F0C33C] mb-4" />
+                    <div className="text-2xl font-bold text-[#131313] mb-2">
+                      Tier: {previewQuery.data.tier}
+                    </div>
+                    <div className="text-[#4F4F4F] space-y-1">
+                      <div>Score: {previewQuery.data.score}</div>
+                      <div>Contributions: {previewQuery.data.contributionCount}</div>
+                      <div>Percentile: {previewQuery.data.percentile}%</div>
+                    </div>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {/* Score Breakdown (Static Info) */}
+            {!queryAccountId && (
+              <div className="grid md:grid-cols-3 gap-6 mb-12">
+                <Card className="p-8 rounded-2xl border-2 border-[#6C3CF0] bg-gradient-to-br from-[#FBF9FF] to-white">
+                  <TrendingUp className="w-12 h-12 text-[#6C3CF0] mb-4" />
+                  <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">1,250</div>
+                  <div className="text-[#4F4F4F]">Total Reputation Score</div>
+                </Card>
+                <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                  <Award className="w-12 h-12 text-[#3DD68C] mb-4" />
+                  <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">42</div>
+                  <div className="text-[#4F4F4F]">Verified Contributions</div>
+                </Card>
+                <Card className="p-8 rounded-2xl border-2 border-gray-100">
+                  <Shield className="w-12 h-12 text-[#A074FF] mb-4" />
+                  <div className="text-5xl font-extrabold text-[#131313] mb-2 font-mono">98%</div>
+                  <div className="text-[#4F4F4F]">Verification Rate</div>
+                </Card>
+              </div>
+            )}
 
           {/* Contribution Types */}
           <section className="mb-12">
@@ -167,16 +322,17 @@ export default function ReputationPage() {
             </Card>
           </section>
 
-          {/* CTA */}
-          <div className="text-center">
-            <Link href="/proof-explorer">
-              <Button size="lg" className="bg-gradient-to-r from-[#6C3CF0] to-[#A074FF] text-white rounded-xl px-8 py-6 text-lg shadow-[0_4px_24px_rgba(108,60,240,0.3)] hover:shadow-[0_8px_32px_rgba(108,60,240,0.4)] transition-all hover:scale-105">
-                Inspect Proofs in Explorer
-              </Button>
-            </Link>
+            {/* CTA */}
+            <div className="text-center">
+              <Link href="/proof-explorer">
+                <Button size="lg" className="bg-gradient-to-r from-[#6C3CF0] to-[#A074FF] text-white rounded-xl px-8 py-6 text-lg shadow-[0_4px_24px_rgba(108,60,240,0.3)] hover:shadow-[0_8px_32px_rgba(108,60,240,0.4)] transition-all hover:scale-105">
+                  Inspect Proofs in Explorer
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </UnifiedSidebar>
   );
 }

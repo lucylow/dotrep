@@ -50,6 +50,10 @@ export default function XcmGatewayPage() {
   const [isQuerying, setIsQuerying] = useState(false);
   const { connectionResult } = useDotRepWallet();
   
+  const [verifyChain, setVerifyChain] = useState("");
+  const [verifyAccount, setVerifyAccount] = useState("");
+  const [verifyTxHash, setVerifyTxHash] = useState("");
+
   const initiateQueryMutation = trpc.polkadot.xcm.initiateQuery.useMutation({
     onSuccess: () => {
       toast.success("XCM query initiated successfully!");
@@ -58,6 +62,18 @@ export default function XcmGatewayPage() {
     onError: (error) => {
       toast.error(`Query failed: ${error.message}`);
       setIsQuerying(false);
+    },
+  });
+
+  const verifyCrossChainMutation = trpc.polkadot.xcm.verifyCrossChain.useMutation({
+    onSuccess: (data) => {
+      toast.success("Cross-chain verification completed!");
+      setVerifyChain("");
+      setVerifyAccount("");
+      setVerifyTxHash("");
+    },
+    onError: (error) => {
+      toast.error(`Verification failed: ${error.message}`);
     },
   });
 
@@ -193,8 +209,9 @@ export default function XcmGatewayPage() {
           </div>
 
           <Tabs defaultValue="query" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="query">Query Reputation</TabsTrigger>
+              <TabsTrigger value="verify">Verify Cross-Chain</TabsTrigger>
               <TabsTrigger value="chains">Supported Chains</TabsTrigger>
               <TabsTrigger value="history">Query History</TabsTrigger>
             </TabsList>
@@ -273,6 +290,95 @@ export default function XcmGatewayPage() {
                         <>
                           <Search className="mr-2 w-5 h-5" />
                           Initiate XCM Query
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="verify">
+              <Card className="p-8">
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-[#131313] mb-2">
+                      Verify Cross-Chain Transaction
+                    </h2>
+                    <p className="text-[#4F4F4F]">
+                      Verify a cross-chain reputation query transaction
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-[#131313] mb-2">
+                        Source Chain
+                      </label>
+                      <select 
+                        className="w-full p-3 border border-gray-300 rounded-lg"
+                        value={verifyChain}
+                        onChange={(e) => setVerifyChain(e.target.value)}
+                      >
+                        <option value="">Select a chain...</option>
+                        {supportedChains
+                          .filter(c => c.status === "connected")
+                          .map(chain => (
+                            <option key={chain.id} value={chain.id}>
+                              {chain.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#131313] mb-2">
+                        Account Address
+                      </label>
+                      <Input
+                        placeholder="5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
+                        value={verifyAccount}
+                        onChange={(e) => setVerifyAccount(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold text-[#131313] mb-2">
+                        Transaction Hash
+                      </label>
+                      <Input
+                        placeholder="0x..."
+                        value={verifyTxHash}
+                        onChange={(e) => setVerifyTxHash(e.target.value)}
+                        className="font-mono"
+                      />
+                    </div>
+
+                    <Button 
+                      className="w-full bg-gradient-to-r from-[#6C3CF0] to-[#A074FF]"
+                      size="lg"
+                      onClick={() => {
+                        if (!verifyChain || !verifyAccount || !verifyTxHash) {
+                          toast.error("Please fill in all fields");
+                          return;
+                        }
+                        verifyCrossChainMutation.mutate({
+                          sourceChain: verifyChain,
+                          targetAccount: verifyAccount,
+                          txHash: verifyTxHash,
+                        });
+                      }}
+                      disabled={verifyCrossChainMutation.isPending || !verifyChain || !verifyAccount || !verifyTxHash}
+                    >
+                      {verifyCrossChainMutation.isPending ? (
+                        <>
+                          <Activity className="mr-2 w-5 h-5 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        <>
+                          <Shield className="mr-2 w-5 h-5" />
+                          Verify Cross-Chain Transaction
                         </>
                       )}
                     </Button>

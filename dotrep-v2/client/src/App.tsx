@@ -29,6 +29,11 @@ const ChainInfoPage = lazy(() => import("./pages/ChainInfoPage"));
 const MultiChainReputationPage = lazy(() => import("./pages/MultiChainReputationPage"));
 const ContextAwareReputationPage = lazy(() => import("./pages/ContextAwareReputationPage"));
 const CloudVerificationPage = lazy(() => import("./pages/CloudVerificationPage"));
+const CloudStoragePage = lazy(() => import("./pages/CloudStoragePage"));
+const ReputationCalculatorPage = lazy(() => import("./pages/ReputationCalculatorPage"));
+const MetricsPage = lazy(() => import("./pages/MetricsPage"));
+const CommunityNotesPage = lazy(() => import("./pages/CommunityNotesPage"));
+const TrustLayerPage = lazy(() => import("./pages/TrustLayerPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Router() {
@@ -156,6 +161,31 @@ function Router() {
       <Route path="/cloud-verification">
         <Suspense fallback={<PageLoader />}>
           <CloudVerificationPage />
+        </Suspense>
+      </Route>
+      <Route path="/cloud-storage">
+        <Suspense fallback={<PageLoader />}>
+          <CloudStoragePage />
+        </Suspense>
+      </Route>
+      <Route path="/reputation-calculator">
+        <Suspense fallback={<PageLoader />}>
+          <ReputationCalculatorPage />
+        </Suspense>
+      </Route>
+      <Route path="/metrics">
+        <Suspense fallback={<PageLoader />}>
+          <MetricsPage />
+        </Suspense>
+      </Route>
+      <Route path="/community-notes">
+        <Suspense fallback={<PageLoader />}>
+          <CommunityNotesPage />
+        </Suspense>
+      </Route>
+      <Route path="/trust-layer">
+        <Suspense fallback={<PageLoader />}>
+          <TrustLayerPage />
         </Suspense>
       </Route>
       <Route path={"/404"}>

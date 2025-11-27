@@ -25,6 +25,9 @@ export default function CloudVerificationPage() {
   const [type, setType] = useState<"github" | "gitlab" | "direct">("github");
   const [metadata, setMetadata] = useState("");
 
+  const [batchContributions, setBatchContributions] = useState("");
+  const [batchMode, setBatchMode] = useState(false);
+
   const verifyMutation = trpc.cloud.verification.verify.useMutation({
     onSuccess: () => {
       toast.success("Contribution verified successfully!");
@@ -34,6 +37,16 @@ export default function CloudVerificationPage() {
     },
     onError: (error) => {
       toast.error(`Verification failed: ${error.message}`);
+    },
+  });
+
+  const batchVerifyMutation = trpc.cloud.verification.batchVerify.useMutation({
+    onSuccess: () => {
+      toast.success("Batch verification initiated successfully!");
+      setBatchContributions("");
+    },
+    onError: (error) => {
+      toast.error(`Batch verification failed: ${error.message}`);
     },
   });
 
@@ -66,6 +79,30 @@ export default function CloudVerificationPage() {
     });
   };
 
+  const handleBatchVerify = () => {
+    if (!batchContributions) {
+      toast.error("Please enter contribution IDs");
+      return;
+    }
+
+    let contributionIds: string[] = [];
+    try {
+      contributionIds = batchContributions.split("\n").filter(id => id.trim());
+      if (contributionIds.length === 0) {
+        toast.error("Please enter at least one contribution ID");
+        return;
+      }
+    } catch {
+      toast.error("Invalid format. Enter one ID per line");
+      return;
+    }
+
+    batchVerifyMutation.mutate({
+      contributionIds,
+      type,
+    });
+  };
+
   return (
     <UnifiedSidebar>
       <div className="p-6">
@@ -81,81 +118,151 @@ export default function CloudVerificationPage() {
             </p>
           </div>
 
+          {/* Mode Toggle */}
+          <div className="flex gap-2 mb-4">
+            <Button
+              variant={!batchMode ? "default" : "outline"}
+              onClick={() => setBatchMode(false)}
+            >
+              Single Verification
+            </Button>
+            <Button
+              variant={batchMode ? "default" : "outline"}
+              onClick={() => setBatchMode(true)}
+            >
+              Batch Verification
+            </Button>
+          </div>
+
           {/* Verification Form */}
           <Card>
             <CardHeader>
-              <CardTitle>Verify Contribution</CardTitle>
+              <CardTitle>
+                {batchMode ? "Batch Verify Contributions" : "Verify Contribution"}
+              </CardTitle>
               <CardDescription>
-                Submit a contribution for cloud-based verification
+                {batchMode
+                  ? "Verify multiple contributions at once"
+                  : "Submit a contribution for cloud-based verification"}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="contributionId">Contribution ID</Label>
-                <Input
-                  id="contributionId"
-                  value={contributionId}
-                  onChange={(e) => setContributionId(e.target.value)}
-                  placeholder="Enter contribution ID"
-                  className="mt-1"
-                />
-              </div>
+              {batchMode ? (
+                <>
+                  <div>
+                    <Label htmlFor="batchContributions">Contribution IDs (one per line)</Label>
+                    <Textarea
+                      id="batchContributions"
+                      value={batchContributions}
+                      onChange={(e) => setBatchContributions(e.target.value)}
+                      placeholder="contribution-id-1&#10;contribution-id-2&#10;contribution-id-3"
+                      className="mt-1 font-mono"
+                      rows={6}
+                    />
+                  </div>
 
-              <div>
-                <Label htmlFor="proof">Proof</Label>
-                <Textarea
-                  id="proof"
-                  value={proof}
-                  onChange={(e) => setProof(e.target.value)}
-                  placeholder="Enter cryptographic proof or URL"
-                  className="mt-1 font-mono"
-                  rows={4}
-                />
-              </div>
+                  <div>
+                    <Label htmlFor="batchType">Verification Type</Label>
+                    <Select value={type} onValueChange={(value: any) => setType(value)}>
+                      <SelectTrigger id="batchType" className="mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="github">GitHub</SelectItem>
+                        <SelectItem value="gitlab">GitLab</SelectItem>
+                        <SelectItem value="direct">Direct</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div>
-                <Label htmlFor="type">Verification Type</Label>
-                <Select value={type} onValueChange={(value: any) => setType(value)}>
-                  <SelectTrigger id="type" className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="github">GitHub</SelectItem>
-                    <SelectItem value="gitlab">GitLab</SelectItem>
-                    <SelectItem value="direct">Direct</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                  <Button
+                    onClick={handleBatchVerify}
+                    disabled={batchVerifyMutation.isPending || !batchContributions}
+                    className="w-full"
+                  >
+                    {batchVerifyMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Batch Verify Contributions
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <Label htmlFor="contributionId">Contribution ID</Label>
+                    <Input
+                      id="contributionId"
+                      value={contributionId}
+                      onChange={(e) => setContributionId(e.target.value)}
+                      placeholder="Enter contribution ID"
+                      className="mt-1"
+                    />
+                  </div>
 
-              <div>
-                <Label htmlFor="metadata">Metadata (JSON, optional)</Label>
-                <Textarea
-                  id="metadata"
-                  value={metadata}
-                  onChange={(e) => setMetadata(e.target.value)}
-                  placeholder='{"repo": "polkadot-sdk", "commit": "abc123"}'
-                  className="mt-1 font-mono"
-                  rows={3}
-                />
-              </div>
+                  <div>
+                    <Label htmlFor="proof">Proof</Label>
+                    <Textarea
+                      id="proof"
+                      value={proof}
+                      onChange={(e) => setProof(e.target.value)}
+                      placeholder="Enter cryptographic proof or URL"
+                      className="mt-1 font-mono"
+                      rows={4}
+                    />
+                  </div>
 
-              <Button
-                onClick={handleVerify}
-                disabled={verifyMutation.isPending || !contributionId || !proof}
-                className="w-full"
-              >
-                {verifyMutation.isPending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Verify Contribution
-                  </>
-                )}
-              </Button>
+                  <div>
+                    <Label htmlFor="type">Verification Type</Label>
+                    <Select value={type} onValueChange={(value: any) => setType(value)}>
+                      <SelectTrigger id="type" className="mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="github">GitHub</SelectItem>
+                        <SelectItem value="gitlab">GitLab</SelectItem>
+                        <SelectItem value="direct">Direct</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="metadata">Metadata (JSON, optional)</Label>
+                    <Textarea
+                      id="metadata"
+                      value={metadata}
+                      onChange={(e) => setMetadata(e.target.value)}
+                      placeholder='{"repo": "polkadot-sdk", "commit": "abc123"}'
+                      className="mt-1 font-mono"
+                      rows={3}
+                    />
+                  </div>
+
+                  <Button
+                    onClick={handleVerify}
+                    disabled={verifyMutation.isPending || !contributionId || !proof}
+                    className="w-full"
+                  >
+                    {verifyMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Verifying...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Verify Contribution
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
 

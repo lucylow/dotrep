@@ -38,6 +38,9 @@ import { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 export default function AnalyticsPage() {
   const [actor, setActor] = useState<string>("");
@@ -69,6 +72,40 @@ export default function AnalyticsPage() {
     { actor: selectedActor!, limit: 3 },
     { enabled: !!selectedActor }
   );
+
+  // Cloud monitoring features
+  const [eventUserId, setEventUserId] = useState("");
+  const [eventType, setEventType] = useState<"reputation_update" | "contribution_verified" | "governance_proposal" | "nft_minted">("reputation_update");
+  const [eventScore, setEventScore] = useState("");
+  const [reportUserId, setReportUserId] = useState("");
+
+  const trackEventMutation = trpc.cloud.monitoring.trackEvent.useMutation({
+    onSuccess: () => {
+      toast.success("Event tracked successfully!");
+      setEventUserId("");
+      setEventScore("");
+    },
+    onError: (error) => {
+      toast.error(`Tracking failed: ${error.message}`);
+    },
+  });
+
+  const { data: monitoringReport, isLoading: reportLoading } = trpc.cloud.monitoring.generateReport.useQuery(
+    { userId: reportUserId },
+    { enabled: !!reportUserId }
+  );
+
+  const handleTrackEvent = () => {
+    if (!eventUserId) {
+      toast.error("Please enter a user ID");
+      return;
+    }
+    trackEventMutation.mutate({
+      type: eventType,
+      userId: eventUserId,
+      score: eventScore ? parseFloat(eventScore) : undefined,
+    });
+  };
 
   const handleSearch = useCallback(() => {
     if (actor.trim()) {
@@ -246,6 +283,7 @@ export default function AnalyticsPage() {
               <TabsTrigger value="breakdown">Score Breakdown</TabsTrigger>
               <TabsTrigger value="explain">Explainability</TabsTrigger>
               <TabsTrigger value="anomalies">Anomalies</TabsTrigger>
+              <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
             </TabsList>
 
             <TabsContent value="contributions">
@@ -469,6 +507,110 @@ export default function AnalyticsPage() {
                   </div>
                 )}
               </Card>
+            </TabsContent>
+
+            <TabsContent value="monitoring">
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* Track Event */}
+                <Card className="p-6">
+                  <h2 className="text-xl font-bold text-[#131313] mb-6">Track Event</h2>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="eventUserId">User ID</Label>
+                      <Input
+                        id="eventUserId"
+                        value={eventUserId}
+                        onChange={(e) => setEventUserId(e.target.value)}
+                        placeholder="user-123"
+                        className="mt-1"
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="eventType">Event Type</Label>
+                      <Select value={eventType} onValueChange={(value: any) => setEventType(value)}>
+                        <SelectTrigger id="eventType" className="mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="reputation_update">Reputation Update</SelectItem>
+                          <SelectItem value="contribution_verified">Contribution Verified</SelectItem>
+                          <SelectItem value="governance_proposal">Governance Proposal</SelectItem>
+                          <SelectItem value="nft_minted">NFT Minted</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="eventScore">Score (optional)</Label>
+                      <Input
+                        id="eventScore"
+                        type="number"
+                        value={eventScore}
+                        onChange={(e) => setEventScore(e.target.value)}
+                        placeholder="100"
+                        className="mt-1"
+                      />
+                    </div>
+
+                    <Button
+                      onClick={handleTrackEvent}
+                      disabled={trackEventMutation.isPending || !eventUserId}
+                      className="w-full"
+                    >
+                      {trackEventMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Tracking...
+                        </>
+                      ) : (
+                        "Track Event"
+                      )}
+                    </Button>
+                  </div>
+                </Card>
+
+                {/* Generate Report */}
+                <Card className="p-6">
+                  <h2 className="text-xl font-bold text-[#131313] mb-6">Generate Report</h2>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="reportUserId">User ID</Label>
+                      <Input
+                        id="reportUserId"
+                        value={reportUserId}
+                        onChange={(e) => setReportUserId(e.target.value)}
+                        placeholder="user-123"
+                        className="mt-1"
+                      />
+                    </div>
+
+                    <Button
+                      onClick={() => {}}
+                      disabled={reportLoading || !reportUserId}
+                      className="w-full"
+                    >
+                      {reportLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate Report"
+                      )}
+                    </Button>
+
+                    {monitoringReport && (
+                      <div className="mt-4 p-4 bg-purple-50 rounded-lg">
+                        <h3 className="font-semibold mb-2">Report Generated</h3>
+                        <pre className="text-xs overflow-auto">
+                          {JSON.stringify(monitoringReport, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              </div>
             </TabsContent>
           </Tabs>
         </div>

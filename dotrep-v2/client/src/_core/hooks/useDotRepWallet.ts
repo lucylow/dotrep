@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { 
   DotRepWalletConnection, 
   ConnectionOptions, 
@@ -38,14 +38,31 @@ export function useDotRepWallet(options: UseDotRepWalletOptions = {}): UseDotRep
   const [connectionResult, setConnectionResult] = useState<WalletConnectionResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
-  const walletConnection = new DotRepWalletConnection(wsEndpoint);
+  const walletConnectionRef = useRef<DotRepWalletConnection | null>(null);
+  
+  useEffect(() => {
+    if (!walletConnectionRef.current) {
+      walletConnectionRef.current = new DotRepWalletConnection(wsEndpoint);
+    }
+    return () => {
+      walletConnectionRef.current?.disconnect();
+      walletConnectionRef.current = null;
+    };
+  }, [wsEndpoint]);
 
   const connect = useCallback(async (connectionOptions?: ConnectionOptions): Promise<WalletConnectionResult | null> => {
+    if (!walletConnectionRef.current) {
+      const error = new Error("Wallet connection not initialized");
+      setError(error);
+      onError?.(error);
+      return null;
+    }
+
     try {
       setIsConnecting(true);
       setError(null);
 
-      const result = await walletConnection.connectWithReputation(connectionOptions);
+      const result = await walletConnectionRef.current.connectWithReputation(connectionOptions);
       
       setConnectionResult(result);
       setIsConnected(true);
@@ -61,11 +78,15 @@ export function useDotRepWallet(options: UseDotRepWalletOptions = {}): UseDotRep
     } finally {
       setIsConnecting(false);
     }
-  }, [wsEndpoint, onConnect, onError]);
+  }, [onConnect, onError]);
 
   const disconnect = useCallback(async () => {
+    if (!walletConnectionRef.current) {
+      return;
+    }
+
     try {
-      await walletConnection.disconnect();
+      await walletConnectionRef.current.disconnect();
       setConnectionResult(null);
       setIsConnected(false);
       setError(null);
@@ -74,7 +95,7 @@ export function useDotRepWallet(options: UseDotRepWalletOptions = {}): UseDotRep
       setError(error);
       toast.error(`Disconnect failed: ${error.message}`);
     }
-  }, [walletConnection]);
+  }, []);
 
   return {
     connect,

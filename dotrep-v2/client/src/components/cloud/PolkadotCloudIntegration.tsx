@@ -33,7 +33,7 @@ export const EnhancedAccountCard: React.FC<{ address: string }> = ({ address }) 
             <p className="text-sm text-muted-foreground mb-1">Reputation</p>
             <div className="flex items-center gap-2">
               <span className="text-2xl font-bold">
-                {connectionResult.reputation.overall}
+                {connectionResult.reputation.score}
               </span>
               <Badge variant="secondary">
                 {connectionResult.reputation.tier}
