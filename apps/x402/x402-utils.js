@@ -70,8 +70,8 @@ function isValidTransactionHash(txHash, chain) {
   
   const chainLower = chain?.toLowerCase() || '';
   
-  // EVM chains (Base, Ethereum, Polygon, Arbitrum)
-  if (['base', 'base-sepolia', 'ethereum', 'polygon', 'arbitrum', 'neuroweb-evm'].includes(chainLower)) {
+  // EVM chains (Base, Ethereum, Polygon, Arbitrum, XDC)
+  if (['base', 'base-sepolia', 'ethereum', 'polygon', 'arbitrum', 'xdc', 'xdc-apothem', 'neuroweb-evm'].includes(chainLower)) {
     return /^0x[a-fA-F0-9]{64}$/.test(txHash);
   }
   

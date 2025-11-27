@@ -477,7 +477,7 @@ export class DataReliabilityService {
     valid: boolean;
     chain: string[];
     errors?: string[];
-  } {
+  }> {
     const chain: string[] = [ual];
     const errors: string[] = [];
     let currentUAL = ual;

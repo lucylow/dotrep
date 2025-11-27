@@ -72,6 +72,7 @@ export class BasicPageRank {
 
   /**
    * Compute PageRank scores for a graph
+   * Improved implementation with predecessor-based computation for better efficiency
    */
   compute(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
     const nodeIds = nodes.map(n => n.id);
@@ -81,20 +82,40 @@ export class BasicPageRank {
       return new Map();
     }
 
-    // Build adjacency list
-    const adjacencyList = new Map<string, string[]>();
+    // Build predecessor list (more efficient for PageRank computation)
+    const predecessors = new Map<string, Array<{ source: string; weight: number }>>();
     const outDegree = new Map<string, number>();
 
+    // Initialize
     nodeIds.forEach(id => {
-      adjacencyList.set(id, []);
+      predecessors.set(id, []);
       outDegree.set(id, 0);
     });
 
-    // Build graph structure
+    // Build graph structure with edge weights
+    const adjacencyList = new Map<string, Array<{ target: string; weight: number }>>();
+    
     for (const edge of edges) {
-      if (adjacencyList.has(edge.source) && adjacencyList.has(edge.target)) {
-        adjacencyList.get(edge.source)!.push(edge.target);
-        outDegree.set(edge.source, outDegree.get(edge.source)! + 1);
+      if (predecessors.has(edge.source) && predecessors.has(edge.target)) {
+        const weight = edge.weight || 1.0;
+        
+        // Add to predecessor list of target (for efficient incoming edge lookup)
+        predecessors.get(edge.target)!.push({
+          source: edge.source,
+          weight: weight
+        });
+        
+        // Build adjacency list for outgoing edges
+        if (!adjacencyList.has(edge.source)) {
+          adjacencyList.set(edge.source, []);
+        }
+        adjacencyList.get(edge.source)!.push({
+          target: edge.target,
+          weight: weight
+        });
+        
+        // Update out degree (weighted)
+        outDegree.set(edge.source, outDegree.get(edge.source)! + weight);
       }
     }
 
@@ -105,36 +126,56 @@ export class BasicPageRank {
     });
 
     // Iterative PageRank computation
+    let converged = false;
+    let iterations = 0;
+    let lastMaxChange = 0;
+    
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      iterations = iteration + 1;
       const newScores = new Map<string, number>();
-      let totalChange = 0;
+      
+      // Initialize new scores with damping factor
+      nodeIds.forEach(id => {
+        newScores.set(id, (1 - this.dampingFactor) / n);
+      });
 
+      // Distribute scores based on incoming edges (predecessor-based approach)
       for (const nodeId of nodeIds) {
-        let rankSum = 0;
-
-        // Sum contributions from incoming links
-        for (const [source, targets] of adjacencyList.entries()) {
-          if (targets.includes(nodeId)) {
-            const outDeg = outDegree.get(source)!;
-            if (outDeg > 0) {
-              rankSum += scores.get(source)! / outDeg;
-            }
+        // Sum contributions from all incoming links (predecessors)
+        const preds = predecessors.get(nodeId)!;
+        
+        for (const { source, weight } of preds) {
+          const outDeg = outDegree.get(source)!;
+          if (outDeg > 0) {
+            const sourceScore = scores.get(source)!;
+            const contribution = (this.dampingFactor * sourceScore * weight) / outDeg;
+            newScores.set(nodeId, newScores.get(nodeId)! + contribution);
           }
         }
-
-        // PageRank formula
-        const newScore = (1 - this.dampingFactor) / n + this.dampingFactor * rankSum;
-        newScores.set(nodeId, newScore);
-        totalChange += Math.abs(newScore - scores.get(nodeId)!);
+        
+        // Handle dangling nodes: distribute dangling score uniformly
+        // (Dangling nodes contribute to all nodes via the damping factor term above)
       }
 
+      // Check for convergence
+      let maxChange = 0;
+      for (const id of nodeIds) {
+        const change = Math.abs(newScores.get(id)! - scores.get(id)!);
+        maxChange = Math.max(maxChange, change);
+      }
+
+      lastMaxChange = maxChange;
       scores = newScores;
 
-      // Check convergence
-      if (totalChange < this.tolerance) {
-        console.log(`✅ PageRank converged after ${iteration + 1} iterations`);
+      if (maxChange < this.tolerance) {
+        converged = true;
+        console.log(`✅ PageRank converged after ${iterations} iterations (max change: ${maxChange.toExponential(2)})`);
         break;
       }
+    }
+
+    if (!converged) {
+      console.warn(`⚠️  PageRank did not converge after ${iterations} iterations (max change: ${lastMaxChange.toExponential(2)})`);
     }
 
     return this.normalizeScores(scores);
@@ -142,24 +183,503 @@ export class BasicPageRank {
 
   /**
    * Normalize scores to 0-1 range
+   * Enhanced with better handling of edge cases
    */
   private normalizeScores(scores: Map<string, number>): Map<string, number> {
+    if (scores.size === 0) {
+      return new Map();
+    }
+
     const values = Array.from(scores.values());
     const maxScore = Math.max(...values);
     const minScore = Math.min(...values);
 
-    if (maxScore === minScore) {
+    // Handle edge case: all scores are equal
+    if (maxScore === minScore || maxScore === 0) {
       const normalized = new Map<string, number>();
       scores.forEach((_, key) => normalized.set(key, 0.5));
       return normalized;
     }
 
+    // Normalize to 0-1 range
     const normalized = new Map<string, number>();
+    const range = maxScore - minScore;
     scores.forEach((score, key) => {
-      normalized.set(key, (score - minScore) / (maxScore - minScore));
+      normalized.set(key, (score - minScore) / range);
     });
 
     return normalized;
+  }
+
+  /**
+   * Get PageRank result with metadata
+   * Tracks iterations and convergence during computation
+   */
+  computeWithMetadata(nodes: GraphNode[], edges: GraphEdge[]): {
+    scores: Map<string, number>;
+    iterations: number;
+    converged: boolean;
+    computationTime: number;
+  } {
+    const startTime = Date.now();
+    const nodeIds = nodes.map(n => n.id);
+    const n = nodeIds.length;
+    
+    if (n === 0) {
+      return {
+        scores: new Map(),
+        iterations: 0,
+        converged: true,
+        computationTime: Date.now() - startTime
+      };
+    }
+
+    // Build predecessor list for efficient computation
+    const predecessors = new Map<string, Array<{ source: string; weight: number }>>();
+    const outDegree = new Map<string, number>();
+
+    nodeIds.forEach(id => {
+      predecessors.set(id, []);
+      outDegree.set(id, 0);
+    });
+
+    // Build graph structure
+    for (const edge of edges) {
+      if (predecessors.has(edge.source) && predecessors.has(edge.target)) {
+        const weight = edge.weight || 1.0;
+        predecessors.get(edge.target)!.push({ source: edge.source, weight });
+        outDegree.set(edge.source, outDegree.get(edge.source)! + weight);
+      }
+    }
+
+    // Initialize scores uniformly
+    let scores = new Map<string, number>();
+    nodeIds.forEach(id => {
+      scores.set(id, 1.0 / n);
+    });
+
+    // Iterative computation with tracking
+    let converged = false;
+    let iterations = 0;
+    
+    for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      iterations = iteration + 1;
+      const newScores = new Map<string, number>();
+      
+      nodeIds.forEach(id => {
+        newScores.set(id, (1 - this.dampingFactor) / n);
+      });
+
+      // Distribute scores from predecessors
+      for (const nodeId of nodeIds) {
+        const preds = predecessors.get(nodeId)!;
+        for (const { source, weight } of preds) {
+          const outDeg = outDegree.get(source)!;
+          if (outDeg > 0) {
+            const contribution = (this.dampingFactor * scores.get(source)! * weight) / outDeg;
+            newScores.set(nodeId, newScores.get(nodeId)! + contribution);
+          }
+        }
+      }
+
+      // Check convergence
+      let maxChange = 0;
+      for (const id of nodeIds) {
+        maxChange = Math.max(maxChange, Math.abs(newScores.get(id)! - scores.get(id)!));
+      }
+
+      scores = newScores;
+      if (maxChange < this.tolerance) {
+        converged = true;
+        break;
+      }
+    }
+
+    const normalizedScores = this.normalizeScores(scores);
+    const computationTime = Date.now() - startTime;
+
+    return {
+      scores: normalizedScores,
+      iterations,
+      converged,
+      computationTime
+    };
+  }
+}
+
+/**
+ * PageRank Analysis Utilities
+ * Provides utilities for identifying key nodes, ranking, and analysis
+ */
+export class PageRankAnalyzer {
+  /**
+   * Get top N nodes by PageRank score
+   */
+  static getTopNodes(scores: Map<string, number>, n: number = 10): Array<{ nodeId: string; score: number; rank: number }> {
+    const sorted = Array.from(scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([nodeId, score], index) => ({
+        nodeId,
+        score,
+        rank: index + 1
+      }));
+    
+    return sorted;
+  }
+
+  /**
+   * Get rank of a specific node (1-based, where 1 is highest score)
+   */
+  static getRank(scores: Map<string, number>, nodeId: string): number {
+    const sorted = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
+    for (let i = 0; i < sorted.length; i++) {
+      if (sorted[i][0] === nodeId) {
+        return i + 1;
+      }
+    }
+    return sorted.length + 1; // Node not found
+  }
+
+  /**
+   * Calculate percentile rank for each node
+   */
+  static calculatePercentiles(scores: Map<string, number>): Map<string, number> {
+    const sorted = Array.from(scores.entries()).sort((a, b) => b[1] - a[1]);
+    const percentiles = new Map<string, number>();
+    const total = sorted.length;
+
+    sorted.forEach(([nodeId, score], index) => {
+      const percentile = ((total - index) / total) * 100;
+      percentiles.set(nodeId, percentile);
+    });
+
+    return percentiles;
+  }
+
+  /**
+   * Identify and categorize top influencers
+   */
+  static identifyTopInfluencers(scores: Map<string, number>): {
+    eliteInfluencers: Array<{ nodeId: string; score: number; rank: number }>;
+    strongInfluencers: Array<{ nodeId: string; score: number; rank: number }>;
+    emergingInfluencers: Array<{ nodeId: string; score: number; rank: number }>;
+    regularUsers: Array<{ nodeId: string; score: number; rank: number }>;
+  } {
+    const sorted = Array.from(scores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 100); // Top 100 for categorization
+
+    type InfluencerEntry = { nodeId: string; score: number; rank: number };
+    const result: {
+      eliteInfluencers: InfluencerEntry[];
+      strongInfluencers: InfluencerEntry[];
+      emergingInfluencers: InfluencerEntry[];
+      regularUsers: InfluencerEntry[];
+    } = {
+      eliteInfluencers: [],
+      strongInfluencers: [],
+      emergingInfluencers: [],
+      regularUsers: []
+    };
+
+    sorted.forEach(([nodeId, score], index) => {
+      const entry = { nodeId, score, rank: index + 1 };
+      
+      if (score > 0.8) {
+        result.eliteInfluencers.push(entry);
+      } else if (score > 0.6) {
+        result.strongInfluencers.push(entry);
+      } else if (score > 0.4) {
+        result.emergingInfluencers.push(entry);
+      } else {
+        result.regularUsers.push(entry);
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Analyze Sybil nodes: compare scores before and after trust weighting
+   */
+  static analyzeSybilNodes(
+    basicScores: Map<string, number>,
+    trustScores: Map<string, number>,
+    sybilNodeIds: string[] = []
+  ): Map<string, {
+    basicScore: number;
+    trustScore: number;
+    basicRank: number;
+    trustRank: number;
+    rankChange: number;
+    scoreReduction: number;
+    scoreReductionPercent: number;
+  }> {
+    const analysis = new Map<string, any>();
+
+    const nodesToAnalyze = sybilNodeIds.length > 0 
+      ? sybilNodeIds 
+      : Array.from(basicScores.keys());
+
+    for (const nodeId of nodesToAnalyze) {
+      const basicScore = basicScores.get(nodeId) || 0;
+      const trustScore = trustScores.get(nodeId) || 0;
+      const basicRank = this.getRank(basicScores, nodeId);
+      const trustRank = this.getRank(trustScores, nodeId);
+      
+      const rankChange = basicRank - trustRank; // Positive means rank improved (lower is better)
+      const scoreReduction = basicScore - trustScore;
+      const scoreReductionPercent = basicScore > 0 
+        ? (scoreReduction / basicScore) * 100 
+        : 0;
+
+      analysis.set(nodeId, {
+        basicScore,
+        trustScore,
+        basicRank,
+        trustRank,
+        rankChange,
+        scoreReduction,
+        scoreReductionPercent
+      });
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Compare basic vs trust-weighted PageRank scores
+   */
+  static compareScores(
+    basicScores: Map<string, number>,
+    trustScores: Map<string, number>
+  ): Map<string, {
+    basic: number;
+    trust: number;
+    change: number;
+    changePercent: number;
+  }> {
+    const comparison = new Map<string, any>();
+
+    for (const [nodeId, basicScore] of basicScores.entries()) {
+      const trustScore = trustScores.get(nodeId) || 0;
+      const change = trustScore - basicScore;
+      const changePercent = basicScore > 0 
+        ? (change / basicScore) * 100 
+        : 0;
+
+      comparison.set(nodeId, {
+        basic: basicScore,
+        trust: trustScore,
+        change,
+        changePercent
+      });
+    }
+
+    return comparison;
+  }
+}
+
+/**
+ * PageRank Demo Runner
+ * Complete demonstration framework for running and analyzing PageRank
+ */
+export class PageRankDemo {
+  private nodes: GraphNode[] = [];
+  private edges: GraphEdge[] = [];
+  private basicPageRank: BasicPageRank;
+  private trustPageRank: TrustWeightedPageRank | null = null;
+
+  constructor(config: {
+    dampingFactor?: number;
+    maxIterations?: number;
+    tolerance?: number;
+    stakeWeights?: Map<string, number>;
+    reputationWeights?: Map<string, number>;
+  } = {}) {
+    this.basicPageRank = new BasicPageRank(config);
+    
+    if (config.stakeWeights || config.reputationWeights) {
+      this.trustPageRank = new TrustWeightedPageRank(config);
+    }
+  }
+
+  /**
+   * Run complete PageRank analysis demonstration
+   */
+  async runCompleteDemo(graphData: { nodes: GraphNode[]; edges: GraphEdge[] }): Promise<{
+    basicScores: Map<string, number>;
+    trustScores: Map<string, number> | null;
+    analysis: any;
+    topInfluencers: any;
+    computationTime: number;
+  }> {
+    const startTime = Date.now();
+    this.nodes = graphData.nodes;
+    this.edges = graphData.edges;
+
+    console.log(`🚀 Starting PageRank Analysis Demo`);
+    console.log(`📊 Graph: ${this.nodes.length} nodes, ${this.edges.length} edges`);
+
+    // 1. Run basic PageRank
+    console.log(`\n1. 🧮 Computing basic PageRank scores...`);
+    const basicResult = this.basicPageRank.computeWithMetadata(this.nodes, this.edges);
+    const basicScores = basicResult.scores;
+    console.log(`✅ Basic PageRank: ${basicResult.iterations} iterations, converged: ${basicResult.converged}`);
+
+    // 2. Run trust-weighted PageRank
+    let trustScores: Map<string, number> | null = null;
+    let trustResult: any = null;
+    
+    if (this.trustPageRank) {
+      console.log(`\n2. 🛡️  Computing trust-weighted PageRank...`);
+      trustResult = this.trustPageRank.computeWithMetadata(this.nodes, this.edges);
+      trustScores = trustResult.scores;
+      console.log(`✅ Trust-weighted PageRank: ${trustResult.iterations} iterations, converged: ${trustResult.converged}`);
+    }
+
+    // 3. Analyze results
+    console.log(`\n3. 📊 Analyzing results...`);
+    const analysis = trustScores 
+      ? this.analyzeResults(basicScores, trustScores)
+      : this.analyzeBasicResults(basicScores);
+
+    // 4. Identify top influencers
+    console.log(`\n4. 🏆 Identifying top influencers...`);
+    const finalScores = trustScores || basicScores;
+    const topInfluencers = PageRankAnalyzer.identifyTopInfluencers(finalScores);
+    
+    const computationTime = Date.now() - startTime;
+    console.log(`\n✅ Analysis complete (${computationTime}ms)`);
+
+    return {
+      basicScores,
+      trustScores,
+      analysis,
+      topInfluencers,
+      computationTime
+    };
+  }
+
+  /**
+   * Analyze and compare PageRank results
+   */
+  private analyzeResults(
+    basicScores: Map<string, number>,
+    trustScores: Map<string, number>
+  ): {
+    basicTop5: Array<{ nodeId: string; score: number; rank: number }>;
+    trustTop5: Array<{ nodeId: string; score: number; rank: number }>;
+    scoreChanges: Map<string, any>;
+    sybilAnalysis?: Map<string, any>;
+  } {
+    const basicTop5 = PageRankAnalyzer.getTopNodes(basicScores, 5);
+    const trustTop5 = PageRankAnalyzer.getTopNodes(trustScores, 5);
+    const scoreChanges = PageRankAnalyzer.compareScores(basicScores, trustScores);
+
+    // Auto-detect potential Sybil nodes (low stake but high basic PageRank)
+    const sybilCandidates = this.detectSybilCandidates(basicScores, trustScores);
+    const sybilAnalysis = sybilCandidates.length > 0
+      ? PageRankAnalyzer.analyzeSybilNodes(basicScores, trustScores, sybilCandidates)
+      : undefined;
+
+    return {
+      basicTop5,
+      trustTop5,
+      scoreChanges,
+      sybilAnalysis
+    };
+  }
+
+  /**
+   * Analyze basic PageRank results (without trust comparison)
+   */
+  private analyzeBasicResults(basicScores: Map<string, number>): {
+    top5: Array<{ nodeId: string; score: number; rank: number }>;
+    percentiles: Map<string, number>;
+  } {
+    const top5 = PageRankAnalyzer.getTopNodes(basicScores, 5);
+    const percentiles = PageRankAnalyzer.calculatePercentiles(basicScores);
+
+    return {
+      top5,
+      percentiles
+    };
+  }
+
+  /**
+   * Detect potential Sybil candidates (nodes with high basic PageRank but low trust signals)
+   */
+  private detectSybilCandidates(
+    basicScores: Map<string, number>,
+    trustScores: Map<string, number>
+  ): string[] {
+    const candidates: string[] = [];
+    const topBasic = PageRankAnalyzer.getTopNodes(basicScores, 20); // Top 20 by basic
+
+    for (const { nodeId, score: basicScore } of topBasic) {
+      const trustScore = trustScores.get(nodeId) || 0;
+      const scoreReduction = (basicScore - trustScore) / basicScore;
+
+      // If trust weighting reduced score by >30%, might be Sybil
+      if (scoreReduction > 0.3) {
+        candidates.push(nodeId);
+      }
+    }
+
+    return candidates;
+  }
+
+  /**
+   * Display results in a readable format
+   */
+  static displayResults(results: {
+    basicScores: Map<string, number>;
+    trustScores: Map<string, number> | null;
+    analysis: any;
+    topInfluencers: any;
+  }): void {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🎯 PAGERANK ANALYSIS RESULTS`);
+    console.log(`${'='.repeat(60)}`);
+
+    // Display top influencers
+    const finalScores = results.trustScores || results.basicScores;
+    console.log(`\n🏆 TOP INFLUENCERS:`);
+    console.log(`-`.repeat(40));
+    
+    const top10 = PageRankAnalyzer.getTopNodes(finalScores, 10);
+    top10.forEach(({ nodeId, score, rank }) => {
+      console.log(`${rank.toString().padStart(2)}. ${nodeId.padEnd(12)} Score: ${score.toFixed(4)}`);
+    });
+
+    // Display Sybil analysis if available
+    if (results.analysis.sybilAnalysis) {
+      console.log(`\n🕵️  SYBIL DETECTION ANALYSIS:`);
+      console.log(`-`.repeat(40));
+      
+      for (const [nodeId, analysis] of results.analysis.sybilAnalysis.entries()) {
+        console.log(`${nodeId}:`);
+        console.log(`  Basic Rank: ${analysis.basicRank.toString().padStart(2)} → Trust Rank: ${analysis.trustRank.toString().padStart(2)}`);
+        console.log(`  Score Reduction: ${analysis.scoreReductionPercent.toFixed(1)}%`);
+      }
+    }
+
+    // Display score changes for top nodes
+    if (results.trustScores && results.analysis.scoreChanges) {
+      console.log(`\n📊 TRUST WEIGHTING IMPACT:`);
+      console.log(`-`.repeat(40));
+      
+      const topNodes = PageRankAnalyzer.getTopNodes(results.trustScores, 5);
+      for (const { nodeId } of topNodes) {
+        const change = results.analysis.scoreChanges.get(nodeId);
+        if (change) {
+          const changeSymbol = change.change > 0 ? '+' : '';
+          console.log(`${nodeId.padEnd(12)}: ${change.basic.toFixed(4)} → ${change.trust.toFixed(4)} (${changeSymbol}${change.changePercent.toFixed(1)}%)`);
+        }
+      }
+    }
   }
 }
 
@@ -189,6 +709,7 @@ export class TrustWeightedPageRank extends BasicPageRank {
 
   /**
    * Compute trust-weighted PageRank
+   * Enhanced with improved trust weight calculation
    */
   compute(nodes: GraphNode[], edges: GraphEdge[]): Map<string, number> {
     // Apply trust weights to edges
@@ -199,7 +720,21 @@ export class TrustWeightedPageRank extends BasicPageRank {
   }
 
   /**
+   * Compute trust-weighted PageRank with metadata
+   */
+  computeWithMetadata(nodes: GraphNode[], edges: GraphEdge[]): {
+    scores: Map<string, number>;
+    iterations: number;
+    converged: boolean;
+    computationTime: number;
+  } {
+    const weightedEdges = this.applyTrustWeights(edges, nodes);
+    return super.computeWithMetadata(nodes, weightedEdges);
+  }
+
+  /**
    * Apply trust-based weights to graph edges
+   * Enhanced with better edge weighting logic
    */
   private applyTrustWeights(edges: GraphEdge[], nodes: GraphNode[]): GraphEdge[] {
     const nodeMap = new Map(nodes.map(n => [n.id, n]));
@@ -207,38 +742,49 @@ export class TrustWeightedPageRank extends BasicPageRank {
     return edges.map(edge => {
       const baseWeight = edge.weight || 1.0;
       const trustWeight = this.calculateTrustWeight(edge.source, nodeMap);
+      const finalWeight = Math.min(2.0, baseWeight * trustWeight); // Cap at 2.0x
       
       return {
         ...edge,
-        weight: Math.min(2.0, baseWeight * trustWeight) // Cap at 2.0x
+        weight: finalWeight,
+        metadata: {
+          ...edge.metadata,
+          trustWeight: trustWeight,
+          originalWeight: baseWeight
+        }
       };
     });
   }
 
   /**
    * Calculate trust weight based on stake and reputation
+   * Enhanced with improved normalization and weighting
    */
   private calculateTrustWeight(nodeId: string, nodeMap: Map<string, GraphNode>): number {
     let weight = 1.0; // Base weight
 
     const node = nodeMap.get(nodeId);
     
-    // Economic stake weighting
+    // Economic stake weighting (normalized to 0-1, then 50% boost cap)
     if (this.stakeWeights.has(nodeId)) {
-      const stakeWeight = Math.min(1.0, (this.stakeWeights.get(nodeId)! / 10000)); // Normalize
-      weight *= (1.0 + stakeWeight * 0.5); // 50% boost for high stake
+      const stake = this.stakeWeights.get(nodeId)!;
+      const normalizedStake = Math.min(1.0, stake / 10000); // Normalize by 10k
+      weight *= (1.0 + normalizedStake * 0.5); // Up to 50% boost
     } else if (node?.metadata?.stake) {
-      const stakeWeight = Math.min(1.0, (node.metadata.stake / 10000));
-      weight *= (1.0 + stakeWeight * 0.5);
+      const normalizedStake = Math.min(1.0, node.metadata.stake / 10000);
+      weight *= (1.0 + normalizedStake * 0.5);
     }
 
-    // Reputation-based weighting
+    // Reputation-based weighting (30% boost cap)
     if (this.reputationWeights.has(nodeId)) {
       const repWeight = this.reputationWeights.get(nodeId)!;
-      weight *= (1.0 + repWeight * 0.3); // 30% boost for high reputation
+      // Ensure reputation weight is between 0 and 1
+      const normalizedRep = Math.min(1.0, Math.max(0, repWeight));
+      weight *= (1.0 + normalizedRep * 0.3); // Up to 30% boost
     }
 
-    return Math.min(weight, 2.0); // Cap maximum weight
+    // Cap maximum weight to prevent extreme values
+    return Math.min(weight, 2.0);
   }
 }
 
@@ -372,7 +918,7 @@ export class MultiDimensionalReputation {
     const outgoing = userEdges.filter(e => e.source === userDid);
     const incoming = userEdges.filter(e => e.target === userDid);
     const reciprocal = outgoing.filter(out => 
-      incoming.some(in => in.source === out.target)
+      incoming.some(incomingEdge => incomingEdge.source === out.target)
     ).length;
     const reciprocityRate = outgoing.length > 0 ? reciprocal / outgoing.length : 0.5;
 

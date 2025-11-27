@@ -38,6 +38,7 @@
 
 const crypto = require('crypto');
 const { HTTP402ResponseBuilder, XPaymentHeaderParser, HTTPHeaderUtils } = require('./x402-http-handlers');
+const { verifyPaymentAuthorizationSignature, validateAuthorizationTiming } = require('./eip712-signing');
 
 /**
  * x402 Payment Middleware Factory
@@ -207,6 +208,64 @@ function x402Middleware(resourceIdOrGetter, options = {}) {
           res.setHeader(key, value);
         }
         return res.json(errorResponse.body);
+      }
+
+      // Validate EIP-712 signature if present
+      if (proof.signature && proof.payer) {
+        try {
+          const timingValidation = validateAuthorizationTiming(proof);
+          if (!timingValidation.valid) {
+            const challenge = generateChallenge();
+            const paymentRequest = createPaymentRequest(policy, challenge);
+            
+            const errorResponse = responseBuilder.buildError(
+              timingValidation.error,
+              402,
+              {
+                code: timingValidation.code || 'AUTHORIZATION_INVALID',
+                paymentRequest,
+                retryable: true,
+                retryAfter: 60
+              }
+            );
+            
+            res.status(errorResponse.status);
+            for (const [key, value] of Object.entries(errorResponse.headers)) {
+              res.setHeader(key, value);
+            }
+            return res.json(errorResponse.body);
+          }
+
+          // Verify EIP-712 signature
+          const sigVerification = await verifyPaymentAuthorizationSignature(proof, {
+            verifyingContract: null // Can be set per resource if needed
+          });
+
+          if (!sigVerification.verified) {
+            const challenge = generateChallenge();
+            const paymentRequest = createPaymentRequest(policy, challenge);
+            
+            const errorResponse = responseBuilder.buildError(
+              sigVerification.error || 'Invalid payment signature',
+              402,
+              {
+                code: 'INVALID_SIGNATURE',
+                paymentRequest,
+                retryable: true,
+                retryAfter: 60
+              }
+            );
+            
+            res.status(errorResponse.status);
+            for (const [key, value] of Object.entries(errorResponse.headers)) {
+              res.setHeader(key, value);
+            }
+            return res.json(errorResponse.body);
+          }
+        } catch (sigError) {
+          console.warn('[x402] EIP-712 signature verification error:', sigError);
+          // Continue with other validation methods if EIP-712 fails
+        }
       }
       
       // Validate payment proof

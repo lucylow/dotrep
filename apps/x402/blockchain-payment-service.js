@@ -27,6 +27,8 @@ class BlockchainPaymentService {
       ethereumRpcUrl: config.ethereumRpcUrl || process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
       polygonRpcUrl: config.polygonRpcUrl || process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
       arbitrumRpcUrl: config.arbitrumRpcUrl || process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
+      xdcRpcUrl: config.xdcRpcUrl || process.env.XDC_RPC_URL || 'https://rpc.xinfin.network',
+      xdcApothemRpcUrl: config.xdcApothemRpcUrl || process.env.XDC_APOTHEM_RPC_URL || 'https://rpc-apothem.xinfin.network',
       
       // Solana RPC endpoints
       solanaRpcUrl: config.solanaRpcUrl || process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
@@ -42,6 +44,8 @@ class BlockchainPaymentService {
         'ethereum': config.usdcEthereumAddress || '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         'polygon': config.usdcPolygonAddress || '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
         'arbitrum': config.usdcArbitrumAddress || '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        'xdc': config.usdcXdcAddress || '0x9483ab65847A447e36c21f1cE8d2C5CbF3C6E5D', // XDC mainnet USDC
+        'xdc-apothem': config.usdcXdcApothemAddress || '0x07865c6E87B9F70255377e024ace6630C1Eaa37F', // XDC testnet
       },
       
       // Confirmation requirements
@@ -51,6 +55,8 @@ class BlockchainPaymentService {
         'ethereum': 2,
         'polygon': 2,
         'arbitrum': 1,
+        'xdc': 1,
+        'xdc-apothem': 1,
         'solana': 1, // Solana uses confirmations, not blocks
       },
       
@@ -92,6 +98,12 @@ class BlockchainPaymentService {
         break;
       case 'arbitrum':
         rpcUrl = this.config.arbitrumRpcUrl;
+        break;
+      case 'xdc':
+        rpcUrl = this.config.xdcRpcUrl;
+        break;
+      case 'xdc-apothem':
+        rpcUrl = this.config.xdcApothemRpcUrl;
         break;
       case 'solana':
         // Solana uses different provider (would need @solana/web3.js)
@@ -442,7 +454,7 @@ class BlockchainPaymentService {
    * Check if chain is supported
    */
   isChainSupported(chain) {
-    const supportedChains = ['base', 'base-sepolia', 'ethereum', 'polygon', 'arbitrum', 'solana'];
+    const supportedChains = ['base', 'base-sepolia', 'ethereum', 'polygon', 'arbitrum', 'xdc', 'xdc-apothem', 'solana'];
     return supportedChains.includes(chain.toLowerCase());
   }
 
