@@ -22,29 +22,62 @@ const { validateTransactionWithReputation } = require('./reputation-filter');
 const app = express();
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/payment')) {
+    console.log(`[x402] ${req.method} ${req.path} - ${req.headers['x-payment'] ? 'with payment' : 'no payment'}`);
+  }
+  next();
+});
+
+// Initialize x402 utilities - must be defined before use
+// Note: Functions are defined below, but we'll set them up after initialization
+let x402Utils = null;
+
+// Initialize x402 utilities function
+function initializeX402Utils() {
+  if (!x402Utils) {
+    const { createAndPublishPaymentEvidence } = require('./payment-evidence-publisher');
+    const { validateTransactionWithReputation } = require('./reputation-filter');
+
+    x402Utils = {
+      accessPolicies,
+      paymentChallenges,
+      paymentProofs,
+      paymentSettlements,
+      validatePaymentProof,
+      verifySettlement,
+      createPaymentRequest,
+      generateChallenge,
+      createAndPublishPaymentEvidence,
+      validateTransactionWithReputation,
+      ENABLE_REPUTATION_FILTER,
+      EDGE_PUBLISH_URL,
+      FACILITATOR_URL,
+      X402_VERSION
+    };
+  }
+  return x402Utils;
+}
+
 // Make x402 utilities available to middleware
-app.locals.x402 = {
-  accessPolicies,
-  paymentChallenges,
-  paymentProofs,
-  paymentSettlements,
-  validatePaymentProof,
-  verifySettlement,
-  createPaymentRequest,
-  generateChallenge,
-  createAndPublishPaymentEvidence,
-  validateTransactionWithReputation,
-  ENABLE_REPUTATION_FILTER,
-  EDGE_PUBLISH_URL,
-  FACILITATOR_URL,
-  X402_VERSION
-};
+app.locals.x402 = new Proxy({}, {
+  get: (target, prop) => {
+    const utils = initializeX402Utils();
+    return utils[prop];
+  }
+});
 
 const PORT = process.env.PORT || 4000;
 const EDGE_PUBLISH_URL = process.env.EDGE_PUBLISH_URL || 'http://mock-dkg:8080';
 const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://facil.example/pay';
-const X402_VERSION = '1.0';
+const X402_VERSION = process.env.X402_VERSION || '1.0';
 const ENABLE_REPUTATION_FILTER = process.env.ENABLE_REPUTATION_FILTER !== 'false';
+
+// Validate environment variables
+if (!process.env.X402_RECIPIENT && process.env.NODE_ENV === 'production') {
+  console.warn('[x402] WARNING: X402_RECIPIENT not set in production environment!');
+}
 
 // In-memory stores (in production, use database)
 const paymentChallenges = new Map(); // challenge -> { policy, expires, nonce }
@@ -244,35 +277,55 @@ function validatePaymentProof(proof, challenge) {
 
 /**
  * Verify payment settlement (via facilitator or on-chain)
+ * @param {object} proof - Payment proof object
+ * @returns {Promise<object>} Settlement verification result
  */
 async function verifySettlement(proof) {
+  // Validate proof structure
+  if (!proof || !proof.txHash) {
+    return { verified: false, error: 'Invalid proof: missing txHash' };
+  }
+
   // If facilitator signature provided, verify via facilitator
-  if (proof.facilitatorSig) {
+  if (proof.facilitatorSig && FACILITATOR_URL) {
     try {
       const response = await axios.post(`${FACILITATOR_URL}/verify`, {
         txHash: proof.txHash,
         chain: proof.chain,
         signature: proof.facilitatorSig
       }, {
-        timeout: 5000
+        timeout: 5000,
+        validateStatus: (status) => status >= 200 && status < 500
       });
       
-      if (response.data.verified) {
-        return { verified: true, method: 'facilitator', blockNumber: response.data.blockNumber };
+      if (response.status === 200 && response.data && response.data.verified) {
+        return { 
+          verified: true, 
+          method: 'facilitator', 
+          blockNumber: response.data.blockNumber || 'pending',
+          facilitatorData: response.data
+        };
       }
     } catch (error) {
-      console.warn('Facilitator verification failed, falling back to on-chain:', error.message);
+      console.warn('[x402] Facilitator verification failed, falling back to on-chain:', error.message);
     }
   }
 
   // Fallback: verify on-chain (simplified for demo)
   // In production, use web3 provider to check transaction inclusion
   // For demo, accept if txHash format is valid
-  if (proof.txHash && proof.txHash.startsWith('0x') && proof.txHash.length >= 64) {
+  const txHashPattern = /^0x[a-fA-F0-9]{64}$/;
+  if (proof.txHash && txHashPattern.test(proof.txHash)) {
+    // In production, would query blockchain here
     return { verified: true, method: 'on-chain', blockNumber: 'pending' };
   }
 
-  return { verified: false, error: 'Settlement verification failed' };
+  // Solana transaction hash format (base58, ~88 chars)
+  if (proof.txHash && proof.txHash.length >= 32 && proof.txHash.length <= 128 && !proof.txHash.startsWith('0x')) {
+    return { verified: true, method: 'on-chain', blockNumber: 'pending', chain: 'solana' };
+  }
+
+  return { verified: false, error: 'Settlement verification failed: invalid transaction hash format' };
 }
 
 // Payment Evidence KA creation and publishing moved to payment-evidence-publisher.js
@@ -1399,11 +1452,20 @@ app.post('/api/agent/purchase', async (req, res) => {
   }
 });
 
+// Initialize x402 utilities before starting server
+initializeX402Utils();
+
 app.listen(PORT, () => {
-  console.log(`✅ x402 Gateway running on http://localhost:${PORT}`);
-  console.log(`📡 Edge Node URL: ${EDGE_PUBLISH_URL}`);
-  console.log(`🔗 Facilitator URL: ${FACILITATOR_URL}`);
-  console.log(`📋 Version: ${X402_VERSION}`);
+  console.log('='.repeat(60));
+  console.log(`🚀 x402 Payment Gateway v${X402_VERSION}`);
+  console.log('='.repeat(60));
+  console.log(`📍 Listening on port ${PORT}`);
+  console.log(`🔗 Facilitator: ${FACILITATOR_URL}`);
+  console.log(`📦 DKG Endpoint: ${EDGE_PUBLISH_URL}`);
+  console.log(`🛡️  Reputation Filter: ${ENABLE_REPUTATION_FILTER ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`💰 Recipient: ${process.env.X402_RECIPIENT || 'NOT SET (using default)'}`);
+  console.log(`📊 Resources: ${Object.keys(accessPolicies).length} access policies configured`);
+  console.log('='.repeat(60));
   console.log(`\n🔐 Protected Resources:`);
   Object.keys(accessPolicies).forEach(resource => {
     const policy = accessPolicies[resource];

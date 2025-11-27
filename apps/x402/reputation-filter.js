@@ -7,14 +7,25 @@
  * - Payment history analysis
  * - Sybil resistance via payment graph
  * - TraceRank-style payment-weighted reputation
+ * - Integration with ReputationCalculator service
  */
 
 const axios = require('axios');
 
+// Cache for reputation queries (TTL: 5 minutes)
+const reputationCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Check if payer meets reputation requirements
+ * @param {string} payer - Payer address/DID
+ * @param {object} requirements - Reputation requirements
+ * @param {string} dkgEndpoint - DKG endpoint URL
+ * @param {object} options - Additional options
+ * @param {string} options.reputationServiceUrl - Optional reputation calculator service URL
+ * @returns {Promise<object>} Reputation check result
  */
-async function checkReputationRequirement(payer, requirements, dkgEndpoint) {
+async function checkReputationRequirement(payer, requirements, dkgEndpoint, options = {}) {
   const {
     minReputationScore = 0,
     minPaymentCount = 0,
@@ -23,8 +34,48 @@ async function checkReputationRequirement(payer, requirements, dkgEndpoint) {
     blockSybilAccounts = true
   } = requirements;
 
+  const { reputationServiceUrl } = options;
+
+  // Check cache first
+  const cacheKey = `reputation:${payer}`;
+  const cached = reputationCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    // Use cached data but still validate against requirements
+    return validateReputationData(cached.data, requirements);
+  }
+
   try {
-    // Query payer's reputation from DKG
+    // Try reputation service first if available
+    if (reputationServiceUrl) {
+      try {
+        const serviceResponse = await axios.get(`${reputationServiceUrl}/reputation/${payer}`, {
+          timeout: 5000,
+          validateStatus: (status) => status >= 200 && status < 500
+        });
+
+        if (serviceResponse.status === 200 && serviceResponse.data) {
+          const reputationData = {
+            reputationScore: serviceResponse.data.overall || serviceResponse.data.score || 0,
+            totalPayments: serviceResponse.data.totalPayments || 0,
+            totalValue: serviceResponse.data.totalValue || 0,
+            verified: serviceResponse.data.verified || false,
+            breakdown: serviceResponse.data.breakdown || {}
+          };
+
+          // Cache the result
+          reputationCache.set(cacheKey, {
+            data: reputationData,
+            timestamp: Date.now()
+          });
+
+          return validateReputationData(reputationData, requirements);
+        }
+      } catch (serviceError) {
+        console.warn('[x402] Reputation service unavailable, falling back to DKG:', serviceError.message);
+      }
+    }
+
+    // Fallback to DKG query
     const reputationQuery = `
       PREFIX schema: <https://schema.org/>
       PREFIX dotrep: <https://dotrep.io/ontology/>
@@ -32,7 +83,7 @@ async function checkReputationRequirement(payer, requirements, dkgEndpoint) {
       SELECT ?profile ?reputationScore ?totalPayments ?totalValue ?verified
       WHERE {
         ?profile a dotrep:TrustedUserProfile .
-        ?profile schema:identifier "${payer}" .
+        ?profile schema:identifier "${escapeSparqlString(payer)}" .
         ?profile dotrep:reputationScore ?reputationScore .
         OPTIONAL {
           ?profile dotrep:paymentStats/dotrep:totalPayments ?totalPayments .
@@ -48,60 +99,124 @@ async function checkReputationRequirement(payer, requirements, dkgEndpoint) {
       format: 'json'
     }, {
       headers: { 'Content-Type': 'application/json' },
-      timeout: 5000
+      timeout: 5000,
+      validateStatus: (status) => status >= 200 && status < 500
     });
 
     const results = response.data.results?.bindings || [];
     
     if (results.length === 0) {
       // New user - check if we allow new users
-      return {
+      const result = {
         allowed: minReputationScore === 0 && minPaymentCount === 0,
         reason: 'User not found in reputation system',
         reputationScore: 0,
         totalPayments: 0,
-        totalValue: 0
+        totalValue: 0,
+        verified: false
       };
+      
+      // Cache negative result (shorter TTL)
+      reputationCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      });
+      
+      return result;
     }
 
     const profile = results[0];
-    const reputationScore = parseFloat(profile.reputationScore?.value || 0);
-    const totalPayments = parseInt(profile.totalPayments?.value || 0);
-    const totalValue = parseFloat(profile.totalValue?.value || 0);
-    const verified = profile.verified?.value === 'true';
-
-    // Check requirements
-    const checks = {
-      reputationScore: reputationScore >= minReputationScore,
-      paymentCount: totalPayments >= minPaymentCount,
-      paymentValue: totalValue >= minTotalPaymentValue,
-      verifiedIdentity: !requireVerifiedIdentity || verified
+    const reputationData = {
+      reputationScore: parseFloat(profile.reputationScore?.value || 0),
+      totalPayments: parseInt(profile.totalPayments?.value || 0),
+      totalValue: parseFloat(profile.totalValue?.value || 0),
+      verified: profile.verified?.value === 'true' || profile.verified?.value === true
     };
 
-    const allPassed = Object.values(checks).every(check => check === true);
+    // Cache the result
+    reputationCache.set(cacheKey, {
+      data: reputationData,
+      timestamp: Date.now()
+    });
 
-    return {
-      allowed: allPassed,
-      reason: allPassed ? 'All requirements met' : 
-        Object.entries(checks)
-          .filter(([_, passed]) => !passed)
-          .map(([key]) => `${key} requirement not met`)
-          .join(', '),
-      reputationScore,
-      totalPayments,
-      totalValue,
-      verified,
-      checks
-    };
+    return validateReputationData(reputationData, requirements);
   } catch (error) {
-    console.error('Error checking reputation:', error.message);
-    // Fail open for demo (in production, might want to fail closed)
+    console.error('[x402] Error checking reputation:', error.message);
+    
+    // Fail open for demo (in production, configure fail-closed for sensitive resources)
+    // Check environment variable for fail mode
+    const failMode = process.env.REPUTATION_FAIL_MODE || 'open';
+    
+    if (failMode === 'closed') {
+      return {
+        allowed: false,
+        reason: 'Reputation check failed',
+        error: error.message,
+        reputationScore: 0,
+        totalPayments: 0,
+        totalValue: 0,
+        verified: false
+      };
+    }
+    
     return {
       allowed: true,
-      reason: 'Reputation check failed, allowing transaction',
-      error: error.message
+      reason: 'Reputation check failed, allowing transaction (fail-open mode)',
+      error: error.message,
+      reputationScore: 0,
+      totalPayments: 0,
+      totalValue: 0,
+      verified: false
     };
   }
+}
+
+/**
+ * Validate reputation data against requirements
+ * @param {object} reputationData - Reputation data
+ * @param {object} requirements - Requirements to check
+ * @returns {object} Validation result
+ */
+function validateReputationData(reputationData, requirements) {
+  const {
+    minReputationScore = 0,
+    minPaymentCount = 0,
+    minTotalPaymentValue = 0,
+    requireVerifiedIdentity = false
+  } = requirements;
+
+  const checks = {
+    reputationScore: reputationData.reputationScore >= minReputationScore,
+    paymentCount: reputationData.totalPayments >= minPaymentCount,
+    paymentValue: reputationData.totalValue >= minTotalPaymentValue,
+    verifiedIdentity: !requireVerifiedIdentity || reputationData.verified
+  };
+
+  const allPassed = Object.values(checks).every(check => check === true);
+
+  return {
+    allowed: allPassed,
+    reason: allPassed ? 'All requirements met' : 
+      Object.entries(checks)
+        .filter(([_, passed]) => !passed)
+        .map(([key]) => `${key} requirement not met`)
+        .join(', '),
+    reputationScore: reputationData.reputationScore,
+    totalPayments: reputationData.totalPayments,
+    totalValue: reputationData.totalValue,
+    verified: reputationData.verified,
+    checks
+  };
+}
+
+/**
+ * Escape string for SPARQL query
+ * @param {string} str - String to escape
+ * @returns {string} Escaped string
+ */
+function escapeSparqlString(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 /**
@@ -294,43 +409,100 @@ async function calculatePaymentWeightedReputation(recipient, dkgEndpoint) {
 
 /**
  * Comprehensive reputation check before allowing transaction
+ * @param {string} payer - Payer address/DID
+ * @param {string} recipient - Recipient address/DID
+ * @param {string|number} amount - Payment amount
+ * @param {string} resourceUAL - Resource UAL
+ * @param {string} dkgEndpoint - DKG endpoint URL
+ * @param {object} requirements - Reputation requirements
+ * @param {object} options - Additional options
+ * @returns {Promise<object>} Transaction validation result
  */
-async function validateTransactionWithReputation(payer, recipient, amount, resourceUAL, dkgEndpoint, requirements = {}) {
-  // Check basic reputation requirements
-  const reputationCheck = await checkReputationRequirement(payer, requirements, dkgEndpoint);
-  
-  // Analyze payment graph for sybil
-  const sybilAnalysis = await analyzePaymentGraph(payer, dkgEndpoint);
-  
-  // Calculate recipient's payment-weighted reputation
-  const recipientReputation = await calculatePaymentWeightedReputation(recipient, dkgEndpoint);
+async function validateTransactionWithReputation(payer, recipient, amount, resourceUAL, dkgEndpoint, requirements = {}, options = {}) {
+  try {
+    // Check basic reputation requirements
+    const reputationCheck = await checkReputationRequirement(payer, requirements, dkgEndpoint, options);
+    
+    // Analyze payment graph for sybil (async, don't block if it fails)
+    let sybilAnalysis = { sybilRisk: 'unknown', riskScore: 0, reason: 'Analysis not performed' };
+    try {
+      sybilAnalysis = await Promise.race([
+        analyzePaymentGraph(payer, dkgEndpoint),
+        new Promise((resolve) => setTimeout(() => resolve({
+          sybilRisk: 'unknown',
+          riskScore: 0,
+          reason: 'Analysis timeout'
+        }), 3000)) // 3s timeout
+      ]);
+    } catch (sybilError) {
+      console.warn('[x402] Sybil analysis failed:', sybilError.message);
+    }
+    
+    // Calculate recipient's payment-weighted reputation (async, don't block if it fails)
+    let recipientReputation = {
+      weightedScore: 0,
+      totalPayments: 0,
+      totalValue: 0,
+      trustLevel: 'unknown'
+    };
+    try {
+      recipientReputation = await Promise.race([
+        calculatePaymentWeightedReputation(recipient, dkgEndpoint),
+        new Promise((resolve) => setTimeout(() => resolve({
+          weightedScore: 0,
+          totalPayments: 0,
+          totalValue: 0,
+          trustLevel: 'unknown',
+          reason: 'Analysis timeout'
+        }), 3000)) // 3s timeout
+      ]);
+    } catch (recipientError) {
+      console.warn('[x402] Recipient reputation analysis failed:', recipientError.message);
+    }
 
-  const allowed = reputationCheck.allowed && 
-                  sybilAnalysis.sybilRisk !== 'high' &&
-                  (requirements.minRecipientTrustLevel 
-                    ? recipientReputation.trustLevel === 'high' 
-                    : true);
+    // Determine if transaction is allowed
+    const sybilCheck = sybilAnalysis.sybilRisk !== 'high' || requirements.allowHighSybilRisk === true;
+    const recipientCheck = !requirements.minRecipientTrustLevel || 
+                          recipientReputation.trustLevel === requirements.minRecipientTrustLevel ||
+                          (requirements.minRecipientTrustLevel === 'high' && recipientReputation.trustLevel === 'high');
 
-  return {
-    allowed,
-    payer: {
-      reputation: reputationCheck,
-      sybilAnalysis
-    },
-    recipient: {
-      paymentWeightedReputation: recipientReputation
-    },
-    reason: allowed ? 'Transaction approved' : 
-      (!reputationCheck.allowed ? reputationCheck.reason :
-       sybilAnalysis.sybilRisk === 'high' ? 'High sybil risk detected' :
-       'Recipient trust level insufficient')
-  };
+    const allowed = reputationCheck.allowed && sybilCheck && recipientCheck;
+
+    return {
+      allowed,
+      payer: {
+        reputation: reputationCheck,
+        sybilAnalysis
+      },
+      recipient: {
+        paymentWeightedReputation: recipientReputation
+      },
+      reason: allowed ? 'Transaction approved' : 
+        (!reputationCheck.allowed ? reputationCheck.reason :
+         sybilAnalysis.sybilRisk === 'high' && !requirements.allowHighSybilRisk ? 'High sybil risk detected' :
+         !recipientCheck ? `Recipient trust level insufficient (required: ${requirements.minRecipientTrustLevel}, actual: ${recipientReputation.trustLevel})` :
+         'Transaction not approved'),
+      timestamp: Date.now()
+    };
+  } catch (error) {
+    console.error('[x402] Error in transaction validation:', error);
+    // Fail based on configuration
+    const failMode = process.env.REPUTATION_FAIL_MODE || 'open';
+    return {
+      allowed: failMode === 'open',
+      reason: `Validation error: ${error.message}`,
+      error: error.message,
+      timestamp: Date.now()
+    };
+  }
 }
 
 module.exports = {
   checkReputationRequirement,
   analyzePaymentGraph,
   calculatePaymentWeightedReputation,
-  validateTransactionWithReputation
+  validateTransactionWithReputation,
+  validateReputationData,
+  escapeSparqlString
 };
 

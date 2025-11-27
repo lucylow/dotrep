@@ -175,55 +175,165 @@ function calculatePaymentWeight(amount, currency) {
 }
 
 /**
- * Publish Payment Evidence KA to DKG
+ * Publish Payment Evidence KA to DKG with retry logic
+ * @param {object} paymentEvidence - Payment evidence KA object
+ * @param {string} dkgEndpoint - DKG endpoint URL
+ * @param {object} options - Publishing options
+ * @param {number} options.maxRetries - Maximum retry attempts (default: 3)
+ * @param {number} options.retryDelay - Delay between retries in ms (default: 1000)
+ * @returns {Promise<object>} Publishing result
  */
-async function publishPaymentEvidenceKA(paymentEvidence, dkgEndpoint) {
+async function publishPaymentEvidenceKA(paymentEvidence, dkgEndpoint, options = {}) {
+  const {
+    maxRetries = 3,
+    retryDelay = 1000
+  } = options;
+
+  let lastError;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await axios.post(`${dkgEndpoint}/publish`, paymentEvidence, {
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 15000,
+        validateStatus: (status) => status >= 200 && status < 500 // Don't throw on 4xx
+      });
+      
+      // Check if request was successful
+      if (response.status >= 200 && response.status < 300) {
+        return {
+          success: true,
+          ual: response.data.ual || `urn:ual:dotrep:payment:${paymentEvidence['schema:identifier']}`,
+          transactionHash: response.data.transactionHash,
+          blockNumber: response.data.blockNumber,
+          data: response.data,
+          attempt: attempt + 1
+        };
+      } else {
+        // Non-retryable error (4xx)
+        throw new Error(`DKG returned status ${response.status}: ${response.statusText}`);
+      }
+    } catch (error) {
+      lastError = error;
+      
+      // Check if error is retryable
+      const isRetryable = 
+        !error.response || // Network error
+        error.response.status >= 500 || // Server error
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT';
+      
+      if (!isRetryable || attempt >= maxRetries) {
+        // Non-retryable error or max retries reached
+        console.error('[x402] Error publishing Payment Evidence KA:', error.message);
+        
+        // Return simulated UAL for demo/fallback
+        return {
+          success: false,
+          ual: `urn:ual:dotrep:payment:simulated:${crypto.randomBytes(8).toString('hex')}`,
+          simulated: true,
+          error: error.message,
+          errorCode: error.code,
+          httpStatus: error.response?.status,
+          attempt: attempt + 1
+        };
+      }
+      
+      // Wait before retry (exponential backoff)
+      const delay = retryDelay * Math.pow(2, attempt);
+      console.warn(`[x402] Publishing attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  // Fallback if all retries failed
+  console.error('[x402] All publishing attempts failed:', lastError?.message);
+  return {
+    success: false,
+    ual: `urn:ual:dotrep:payment:simulated:${crypto.randomBytes(8).toString('hex')}`,
+    simulated: true,
+    error: lastError?.message || 'Unknown error',
+    errorCode: lastError?.code,
+    attempts: maxRetries + 1
+  };
+}
+
+/**
+ * Create and publish Payment Evidence KA in one call
+ * @param {object} paymentData - Payment data object
+ * @param {string} dkgEndpoint - DKG endpoint URL
+ * @param {object} options - Publishing options
+ * @returns {Promise<object>} Payment evidence and publishing result
+ */
+async function createAndPublishPaymentEvidence(paymentData, dkgEndpoint, options = {}) {
   try {
-    const response = await axios.post(`${dkgEndpoint}/publish`, paymentEvidence, {
-      headers: { 
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 15000
-    });
+    // Validate required fields
+    const requiredFields = ['txHash', 'payer', 'recipient', 'amount', 'currency', 'chain'];
+    const missingFields = requiredFields.filter(field => !paymentData[field]);
+    
+    if (missingFields.length > 0) {
+      throw new Error(`Missing required payment data fields: ${missingFields.join(', ')}`);
+    }
+
+    const paymentEvidence = createPaymentEvidenceKA(paymentData);
+    const result = await publishPaymentEvidenceKA(paymentEvidence, dkgEndpoint, options);
     
     return {
-      success: true,
-      ual: response.data.ual || `urn:ual:dotrep:payment:${paymentEvidence['schema:identifier']}`,
-      transactionHash: response.data.transactionHash,
-      blockNumber: response.data.blockNumber,
-      data: response.data
+      paymentEvidence,
+      publishResult: result
     };
   } catch (error) {
-    console.error('Error publishing Payment Evidence KA:', error.message);
-    
-    // Return simulated UAL for demo/fallback
+    console.error('[x402] Error creating payment evidence:', error);
+    // Still create evidence object even if publishing fails
+    const paymentEvidence = createPaymentEvidenceKA(paymentData);
     return {
-      success: false,
-      ual: `urn:ual:dotrep:payment:simulated:${crypto.randomBytes(8).toString('hex')}`,
-      simulated: true,
-      error: error.message
+      paymentEvidence,
+      publishResult: {
+        success: false,
+        ual: `urn:ual:dotrep:payment:simulated:${crypto.randomBytes(8).toString('hex')}`,
+        simulated: true,
+        error: error.message
+      }
     };
   }
 }
 
 /**
- * Create and publish Payment Evidence KA in one call
- */
-async function createAndPublishPaymentEvidence(paymentData, dkgEndpoint) {
-  const paymentEvidence = createPaymentEvidenceKA(paymentData);
-  const result = await publishPaymentEvidenceKA(paymentEvidence, dkgEndpoint);
-  
-  return {
-    paymentEvidence,
-    publishResult: result
-  };
-}
-
-/**
  * Query payment evidence from DKG by payer or recipient
+ * @param {object} query - Query parameters
+ * @param {string} query.payer - Payer address (optional)
+ * @param {string} query.recipient - Recipient address (optional)
+ * @param {string} query.resourceUAL - Resource UAL (optional)
+ * @param {number} query.minAmount - Minimum amount (optional)
+ * @param {number} query.limit - Result limit (default: 100)
+ * @param {string} dkgEndpoint - DKG endpoint URL
+ * @returns {Promise<object>} Query results
  */
 async function queryPaymentEvidence(query, dkgEndpoint) {
+  // Build SPARQL query safely
+  const filters = [];
+  
+  if (query.payer) {
+    filters.push(`FILTER(?payer = "${escapeSparqlString(query.payer)}")`);
+  }
+  if (query.recipient) {
+    filters.push(`FILTER(?recipient = "${escapeSparqlString(query.recipient)}")`);
+  }
+  if (query.resourceUAL) {
+    filters.push(`FILTER(?resourceUAL = "${escapeSparqlString(query.resourceUAL)}")`);
+  }
+  if (query.minAmount !== undefined) {
+    const minAmount = parseFloat(query.minAmount);
+    if (!isNaN(minAmount)) {
+      filters.push(`FILTER(?amount >= ${minAmount})`);
+    }
+  }
+
+  const limit = Math.min(Math.max(1, parseInt(query.limit) || 100), 1000); // Cap at 1000
+
   const sparqlQuery = `
     PREFIX schema: <https://schema.org/>
     PREFIX dotrep: <https://dotrep.io/ontology/>
@@ -239,13 +349,10 @@ async function queryPaymentEvidence(query, dkgEndpoint) {
       ?payment amount/schema:currency ?currency .
       ?payment schema:dateCreated ?timestamp .
       ?payment dotrep:resourceUAL ?resourceUAL .
-      ${query.payer ? `FILTER(?payer = "${query.payer}")` : ''}
-      ${query.recipient ? `FILTER(?recipient = "${query.recipient}")` : ''}
-      ${query.resourceUAL ? `FILTER(?resourceUAL = "${query.resourceUAL}")` : ''}
-      ${query.minAmount ? `FILTER(?amount >= ${query.minAmount})` : ''}
+      ${filters.join('\n      ')}
     }
     ORDER BY DESC(?timestamp)
-    LIMIT ${query.limit || 100}
+    LIMIT ${limit}
   `;
 
   try {
@@ -254,14 +361,44 @@ async function queryPaymentEvidence(query, dkgEndpoint) {
       format: 'json'
     }, {
       headers: { 'Content-Type': 'application/json' },
-      timeout: 10000
+      timeout: 15000,
+      validateStatus: (status) => status >= 200 && status < 500
     });
     
-    return response.data;
+    if (response.status >= 200 && response.status < 300) {
+      return {
+        success: true,
+        results: response.data.results || response.data,
+        count: Array.isArray(response.data.results) ? response.data.results.length : 0
+      };
+    } else {
+      return {
+        success: false,
+        results: [],
+        error: `DKG returned status ${response.status}`,
+        httpStatus: response.status
+      };
+    }
   } catch (error) {
-    console.error('Error querying payment evidence:', error.message);
-    return { results: [], error: error.message };
+    console.error('[x402] Error querying payment evidence:', error.message);
+    return { 
+      success: false,
+      results: [], 
+      error: error.message,
+      errorCode: error.code
+    };
   }
+}
+
+/**
+ * Escape string for SPARQL query (prevent injection)
+ * @param {string} str - String to escape
+ * @returns {string} Escaped string
+ */
+function escapeSparqlString(str) {
+  if (typeof str !== 'string') return '';
+  // Basic escaping: replace quotes and backslashes
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 module.exports = {
@@ -270,6 +407,7 @@ module.exports = {
   createAndPublishPaymentEvidence,
   queryPaymentEvidence,
   calculatePaymentWeight,
-  getChainId
+  getChainId,
+  escapeSparqlString
 };
 

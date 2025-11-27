@@ -16,6 +16,8 @@ import { DKGClient } from '../../dkg-integration/dkg-client';
 import { getPolkadotApi, type PolkadotApiService } from './polkadotApi';
 import { getSybilDetectionService, type SybilDetectionResult } from './sybilDetection';
 import { AccountClusteringService, type Account } from '../../dkg-integration/account-clustering';
+import { BotClusterDetector, type BotDetectionResults, type ReputationScores, type GraphData } from './botClusterDetector';
+import { GraphNode, GraphEdge } from '../../dkg-integration/graph-algorithms';
 
 // ============================================================================
 // Types & Interfaces
@@ -295,6 +297,7 @@ export class SybilDetectiveAgent {
   private sybilService: ReturnType<typeof getSybilDetectionService>;
   private dkgClient: DKGClient;
   private clusteringService: AccountClusteringService;
+  private botClusterDetector: BotClusterDetector;
 
   constructor(dkgClient: DKGClient) {
     this.sybilService = getSybilDetectionService();
@@ -313,10 +316,25 @@ export class SybilDetectiveAgent {
         graphDistance: 0.05,
       },
     });
+    // Initialize enhanced bot cluster detector
+    this.botClusterDetector = new BotClusterDetector({
+      minClusterSize: 3,
+      suspicionThreshold: 0.5,
+      confirmedThreshold: 0.7,
+      lowReputationThreshold: 0.3,
+      highSybilRiskThreshold: 0.7,
+      detectionWeights: {
+        reputationBased: 0.25,
+        graphStructure: 0.35,
+        behavioralPatterns: 0.30,
+        temporalPatterns: 0.10,
+      },
+    });
   }
 
   /**
    * Detect Sybil clusters in the social graph
+   * Enhanced version with multi-dimensional bot cluster detection
    */
   async detectSybilClusters(
     graphData: Array<{
@@ -326,6 +344,7 @@ export class SybilDetectiveAgent {
       connections: Array<{ target: string; weight: number }>;
     }>
   ): Promise<SybilCluster[]> {
+    // Use legacy detection for backward compatibility
     const detectionResults = await this.sybilService.detectSybils(graphData);
 
     // Group detected Sybils into clusters
@@ -335,6 +354,66 @@ export class SybilDetectiveAgent {
     );
 
     return clusters;
+  }
+
+  /**
+   * Enhanced bot cluster detection using multi-dimensional analysis
+   * Analyzes reputation patterns, graph structure, behavioral patterns, and temporal patterns
+   */
+  async detectBotClustersEnhanced(
+    graphNodes: GraphNode[],
+    graphEdges: GraphEdge[],
+    reputationScores: ReputationScores
+  ): Promise<BotDetectionResults> {
+    const graphData: GraphData = {
+      nodes: graphNodes,
+      edges: graphEdges,
+    };
+
+    return await this.botClusterDetector.detectBotClusters(graphData, reputationScores);
+  }
+
+  /**
+   * Convert enhanced bot detection results to SybilCluster format for compatibility
+   */
+  convertBotDetectionToSybilClusters(
+    botDetectionResults: BotDetectionResults
+  ): SybilCluster[] {
+    const sybilClusters: SybilCluster[] = [];
+
+    // Convert confirmed bot clusters
+    botDetectionResults.confirmedBotClusters.forEach(cluster => {
+      sybilClusters.push({
+        clusterId: cluster.clusterId,
+        accounts: cluster.nodes.map(nodeId => ({
+          did: nodeId,
+          reputation: cluster.metrics.reputationAnalysis.avgReputation,
+          riskScore: cluster.suspicionScore,
+        })),
+        riskLevel: cluster.suspicionScore > 0.8 ? 'critical' :
+                   cluster.suspicionScore > 0.7 ? 'high' :
+                   cluster.suspicionScore > 0.5 ? 'medium' : 'low',
+        patterns: cluster.riskFactors,
+        confidence: cluster.suspicionScore,
+      });
+    });
+
+    // Convert suspicious clusters
+    botDetectionResults.suspiciousClusters.forEach(cluster => {
+      sybilClusters.push({
+        clusterId: cluster.clusterId,
+        accounts: cluster.nodes.map(nodeId => ({
+          did: nodeId,
+          reputation: cluster.metrics.reputationAnalysis.avgReputation,
+          riskScore: cluster.suspicionScore,
+        })),
+        riskLevel: cluster.suspicionScore > 0.6 ? 'medium' : 'low',
+        patterns: cluster.riskFactors,
+        confidence: cluster.suspicionScore,
+      });
+    });
+
+    return sybilClusters;
   }
 
   /**
