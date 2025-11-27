@@ -12,6 +12,8 @@ import { serveStatic, setupVite } from "./vite";
 import { startBatchAnchoring } from "../services/batchAnchorService";
 import restApiRouter from "./restApi";
 import { openApiSpec } from "./openapi";
+import { isMockMode } from "./mockConfig";
+import { mockRouter } from "./mockRouter";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -115,11 +117,16 @@ async function startServer() {
     `);
   });
   
-  // tRPC API
+  // tRPC API - use mock router if in mock mode
+  const router = isMockMode() ? mockRouter : appRouter;
+  if (isMockMode()) {
+    console.log("🎭 Running in MOCK MODE - using mock router");
+  }
+  
   app.use(
     "/api/trpc",
     createExpressMiddleware({
-      router: appRouter,
+      router,
       createContext,
     })
   );
@@ -138,7 +145,8 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    console.log(`🚀 Server running on http://localhost:${port}/`);
+    const mode = isMockMode() ? "🎭 MOCK MODE" : "🚀 PRODUCTION MODE";
+    console.log(`${mode} - Server running on http://localhost:${port}/`);
     console.log(`Health check available at http://localhost:${port}/health`);
     console.log(`Readiness check available at http://localhost:${port}/ready`);
     console.log(`📚 REST API documentation at http://localhost:${port}/api/docs`);
@@ -146,8 +154,12 @@ async function startServer() {
     console.log(`🔌 REST API endpoints available at http://localhost:${port}/api/v1/*`);
     console.log(`⚡ tRPC API available at http://localhost:${port}/api/trpc/*`);
     
-    // Start batch anchoring service (runs every 60 seconds)
-    if (process.env.NODE_ENV === "production" || process.env.ENABLE_BATCH_ANCHORING === "true") {
+    if (isMockMode()) {
+      console.log(`📝 All data is simulated - no database or blockchain connections required`);
+    }
+    
+    // Start batch anchoring service (runs every 60 seconds) - only in production mode
+    if (!isMockMode() && (process.env.NODE_ENV === "production" || process.env.ENABLE_BATCH_ANCHORING === "true")) {
       startBatchAnchoring(60000);
       console.log("🔄 Batch anchoring service started");
     }

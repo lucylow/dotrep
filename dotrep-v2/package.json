@@ -5,9 +5,13 @@
   "license": "MIT",
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
+    "dev:mock": "MOCK_MODE=true NODE_ENV=development tsx watch server/_core/index.ts",
     "dev:worker": "NODE_ENV=development tsx watch server/workers/githubIngestWorker.ts",
+    "mock": "MOCK_MODE=true tsx server/_core/mockServer.ts",
+    "mock:dev": "MOCK_MODE=true NODE_ENV=development tsx watch server/_core/mockServer.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
+    "start:mock": "MOCK_MODE=true NODE_ENV=production node dist/index.js",
     "start:worker": "NODE_ENV=production node dist/workers/githubIngestWorker.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
