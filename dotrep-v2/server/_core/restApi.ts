@@ -17,6 +17,7 @@ import { createContext } from './context';
 import { TRPCError } from '@trpc/server';
 import { logError } from './errorHandler';
 import { createDKGClientV8, type ReputationAsset } from '../../dkg-integration/dkg-client-v8';
+import premiumApiRouter from './premiumApi';
 
 const router = Router();
 
@@ -110,6 +111,11 @@ router.get('/api', (req: Request, res: Response) => {
         get: 'GET /api/v1/contributors/:id',
         byUsername: 'GET /api/v1/contributors/username/:username',
         stats: 'GET /api/v1/contributors/:id/stats'
+      },
+      premium: {
+        reputationScore: 'GET /api/premium/reputation-score/:userId (x402: $0.10)',
+        sybilAnalysis: 'GET /api/premium/sybil-analysis-report (x402: $0.25)',
+        influencerRecommendations: 'GET /api/premium/influencer-recommendations (x402: $0.15)'
       }
     },
     documentation: '/api/docs',
@@ -763,6 +769,20 @@ router.get('/v1/contributors/:id/stats', async (req: Request, res: Response, nex
     next(error);
   }
 });
+
+// ============================================================================
+// Premium API Endpoints (x402 Protected)
+// ============================================================================
+
+/**
+ * Mount premium API router with x402 payment protection
+ * 
+ * These endpoints require x402 micropayments for access:
+ * - GET /api/premium/reputation-score/:userId ($0.10)
+ * - GET /api/premium/sybil-analysis-report ($0.25)
+ * - GET /api/premium/influencer-recommendations ($0.15)
+ */
+router.use('/premium', premiumApiRouter);
 
 // Apply error handler
 router.use(handleError);

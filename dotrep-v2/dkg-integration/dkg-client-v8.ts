@@ -1186,6 +1186,469 @@ export class DKGClientV8 {
   }
 
   /**
+   * Query chatbot user reputation score with multi-dimensional metrics
+   * 
+   * Enhanced SPARQL query supporting trust marketplace schema structure.
+   * Retrieves comprehensive reputation data including overall score, component scores,
+   * sybil risk, and temporal consistency metrics.
+   * 
+   * @param userDid - User's Decentralized Identifier (DID)
+   * @param options - Query options
+   * @param options.includeBreakdown - Include detailed component breakdown (default: true)
+   * @param options.includeSybilRisk - Include sybil risk assessment (default: true)
+   * @param options.includeTemporalMetrics - Include temporal consistency metrics (default: false)
+   * @returns Reputation score data with breakdown
+   * 
+   * @example
+   * ```typescript
+   * const reputation = await dkgClient.queryChatbotUserReputation(
+   *   'did:dkg:user:chatbot_123',
+   *   { includeBreakdown: true, includeSybilRisk: true }
+   * );
+   * console.log(`Reputation: ${reputation.overallScore}, Sybil Risk: ${reputation.sybilRisk}`);
+   * ```
+   */
+  async queryChatbotUserReputation(
+    userDid: string,
+    options: {
+      includeBreakdown?: boolean;
+      includeSybilRisk?: boolean;
+      includeTemporalMetrics?: boolean;
+    } = {}
+  ): Promise<{
+    userDid: string;
+    overallScore: number;
+    lastUpdated: string;
+    componentScores?: {
+      socialRank?: number;
+      economicStake?: number;
+      endorsementQuality?: number;
+      temporalConsistency?: number;
+    };
+    sybilRisk?: number;
+    behavioralAnomaly?: number;
+    timestamp: string;
+  }> {
+    if (!this.isInitialized) {
+      throw new Error('DKG client not initialized');
+    }
+
+    const {
+      includeBreakdown = true,
+      includeSybilRisk = true,
+      includeTemporalMetrics = false
+    } = options;
+
+    // Validate user DID
+    if (!userDid || typeof userDid !== 'string' || userDid.trim().length === 0) {
+      throw new Error('User DID must be a non-empty string');
+    }
+
+    // Escape user DID to prevent SPARQL injection
+    const escapedUserDid = escapeSPARQLString(userDid);
+
+    // Build comprehensive SPARQL query based on trust marketplace schema
+    const query = `
+      PREFIX schema: <https://schema.org/>
+      PREFIX tm: <https://trust-marketplace.org/schema/v1/>
+      PREFIX dotrep: <https://dotrep.io/ontology/>
+      PREFIX prov: <http://www.w3.org/ns/prov#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+      
+      SELECT ?user ?overallScore ?lastUpdated ?socialRank ?economicStake 
+             ?endorsementQuality ?temporalConsistency ?sybilRisk ?behavioralAnomaly
+      WHERE {
+        {
+          # Query for ReputationScore asset
+          ?reputationAsset a tm:ReputationScore ;
+            tm:subject "${escapedUserDid}" ;
+            tm:compositeScore/tm:overall ?overallScore ;
+            prov:generatedAtTime ?lastUpdated .
+          
+          OPTIONAL {
+            ?reputationAsset tm:componentScores ?components .
+            ?components tm:socialRank ?socialRank .
+          }
+          OPTIONAL {
+            ?reputationAsset tm:componentScores ?components .
+            ?components tm:economicStake ?economicStake .
+          }
+          OPTIONAL {
+            ?reputationAsset tm:componentScores ?components .
+            ?components tm:endorsementQuality ?endorsementQuality .
+          }
+          OPTIONAL {
+            ?reputationAsset tm:componentScores ?components .
+            ?components tm:temporalConsistency ?temporalConsistency .
+          }
+          OPTIONAL {
+            ?reputationAsset tm:sybilResistance/tm:behavioralAnomaly ?behavioralAnomaly .
+          }
+          OPTIONAL {
+            ?reputationAsset tm:sybilResistance/tm:sybilRisk ?sybilRisk .
+          }
+          
+          BIND("${escapedUserDid}" AS ?user)
+        }
+        UNION
+        {
+          # Fallback: Query for TrustedUserProfile
+          ?profile a tm:TrustedUserProfile ;
+            tm:creator "${escapedUserDid}" ;
+            tm:reputationMetrics/tm:overallScore ?overallScore ;
+            schema:dateModified ?lastUpdated .
+          
+          OPTIONAL {
+            ?profile tm:reputationMetrics/tm:socialRank ?socialRank .
+          }
+          OPTIONAL {
+            ?profile tm:reputationMetrics/tm:economicStake ?economicStake .
+          }
+          OPTIONAL {
+            ?profile tm:reputationMetrics/tm:endorsementQuality ?endorsementQuality .
+          }
+          OPTIONAL {
+            ?profile tm:reputationMetrics/tm:temporalConsistency ?temporalConsistency .
+          }
+          
+          BIND("${escapedUserDid}" AS ?user)
+        }
+        UNION
+        {
+          # Fallback: Query legacy dotrep schema
+          ?asset a schema:Person ;
+            schema:identifier "${escapedUserDid}" ;
+            dotrep:reputationScore ?overallScore ;
+            schema:dateModified ?lastUpdated .
+          
+          OPTIONAL { ?asset dotrep:socialRank ?socialRank . }
+          OPTIONAL { ?asset dotrep:economicStake ?economicStake . }
+          
+          BIND("${escapedUserDid}" AS ?user)
+        }
+      }
+      ORDER BY DESC(?lastUpdated)
+      LIMIT 1
+    `;
+
+    // Use mock mode if enabled
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Querying chatbot user reputation: ${userDid}`);
+      return {
+        userDid,
+        overallScore: 0.75,
+        lastUpdated: new Date().toISOString(),
+        componentScores: includeBreakdown ? {
+          socialRank: 0.80,
+          economicStake: 0.70,
+          endorsementQuality: 0.75,
+          temporalConsistency: 0.85
+        } : undefined,
+        sybilRisk: includeSybilRisk ? 0.15 : undefined,
+        behavioralAnomaly: includeSybilRisk ? 0.12 : undefined,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    return this.retryOperation(async () => {
+      console.log(`🔍 Querying chatbot user reputation: ${userDid}`);
+      const results = await this.executeSafeQuery(query, 'SELECT');
+
+      // Handle both array results and wrapped results
+      const resultsArray = Array.isArray(results) ? results : (results.results || []);
+      
+      if (resultsArray.length === 0) {
+        throw new Error(`No reputation data found for user: ${userDid}`);
+      }
+
+      const result = resultsArray[0];
+
+      // Extract values from SPARQL result format
+      const getValue = (val: any): any => {
+        if (val && typeof val === 'object' && 'value' in val) {
+          return val.value;
+        }
+        return val;
+      };
+
+      const parseFloatValue = (val: any): number | undefined => {
+        const v = getValue(val);
+        if (v === null || v === undefined || v === '') return undefined;
+        const parsed = typeof v === 'string' ? parseFloat(v) : Number(v);
+        return isNaN(parsed) ? undefined : parsed;
+      };
+
+      const reputation = {
+        userDid,
+        overallScore: parseFloatValue(result.overallScore) || 0,
+        lastUpdated: getValue(result.lastUpdated) || new Date().toISOString(),
+        componentScores: includeBreakdown ? {
+          socialRank: parseFloatValue(result.socialRank),
+          economicStake: parseFloatValue(result.economicStake),
+          endorsementQuality: parseFloatValue(result.endorsementQuality),
+          temporalConsistency: includeTemporalMetrics ? parseFloatValue(result.temporalConsistency) : undefined
+        } : undefined,
+        sybilRisk: includeSybilRisk ? parseFloatValue(result.sybilRisk) : undefined,
+        behavioralAnomaly: includeSybilRisk ? parseFloatValue(result.behavioralAnomaly) : undefined,
+        timestamp: new Date().toISOString()
+      };
+
+      console.log(`✅ Retrieved reputation for ${userDid}: ${reputation.overallScore}`);
+      return reputation;
+    }, 'Query chatbot user reputation').catch((error) => {
+      if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
+        console.warn('⚠️  Reputation query failed, falling back to mock mode');
+        this.useMockMode = true;
+        return this.queryChatbotUserReputation(userDid, options);
+      }
+      throw error;
+    });
+  }
+
+  /**
+   * Query detailed reputation breakdown for chatbot user
+   * 
+   * Retrieves comprehensive multi-dimensional reputation metrics including
+   * all component scores, validation data, and provenance information.
+   * 
+   * @param userDid - User's Decentralized Identifier (DID)
+   * @returns Detailed reputation breakdown with all metrics
+   * 
+   * @example
+   * ```typescript
+   * const breakdown = await dkgClient.queryDetailedChatbotReputation(
+   *   'did:dkg:user:chatbot_123'
+   * );
+   * console.log(`Social Rank: ${breakdown.componentScores.socialRank}`);
+   * ```
+   */
+  async queryDetailedChatbotReputation(userDid: string): Promise<{
+    userDid: string;
+    overallScore: number;
+    componentScores: {
+      socialRank: number;
+      economicStake: number;
+      endorsementQuality: number;
+      temporalConsistency: number;
+      validationScore?: number;
+    };
+    sybilResistance: {
+      sybilRisk: number;
+      behavioralAnomaly: number;
+      clusterDetection?: number;
+    };
+    provenance: {
+      computedBy?: string;
+      method?: string;
+      timestamp: string;
+    };
+  }> {
+    const query = `
+      PREFIX tm: <https://trust-marketplace.org/schema/v1/>
+      PREFIX prov: <http://www.w3.org/ns/prov#>
+      PREFIX schema: <https://schema.org/>
+      
+      SELECT ?component ?value ?provenance ?method ?computedBy ?timestamp
+             ?sybilRisk ?behavioralAnomaly
+      WHERE {
+        ?reputation a tm:ReputationScore ;
+          tm:subject "${escapeSPARQLString(userDid)}" ;
+          tm:compositeScore/tm:overall ?overallScore .
+        
+        ?reputation tm:componentScores ?components .
+        ?components ?component ?value .
+        
+        OPTIONAL {
+          ?reputation tm:provenance ?provenance .
+          ?provenance prov:wasAttributedTo ?computedBy .
+          ?provenance prov:used ?method .
+          ?provenance prov:generatedAtTime ?timestamp .
+        }
+        
+        OPTIONAL {
+          ?reputation tm:sybilResistance/tm:sybilRisk ?sybilRisk .
+        }
+        OPTIONAL {
+          ?reputation tm:sybilResistance/tm:behavioralAnomaly ?behavioralAnomaly .
+        }
+      }
+      ORDER BY DESC(?timestamp)
+      LIMIT 100
+    `;
+
+    return this.executeSafeQuery(query, 'SELECT').then((results: any) => {
+      // Handle both array results and wrapped results
+      const resultsArray = Array.isArray(results) ? results : (results.results || []);
+      
+      if (!resultsArray || resultsArray.length === 0) {
+        throw new Error(`No detailed reputation data found for user: ${userDid}`);
+      }
+
+      const componentScores: Record<string, number> = {};
+      let sybilRisk: number | undefined;
+      let behavioralAnomaly: number | undefined;
+      let provenance: any = {};
+
+      resultsArray.forEach((row: any) => {
+        const component = row.component?.value || row.component;
+        const value = parseFloat(row.value?.value || row.value);
+        
+        if (component && !isNaN(value)) {
+          if (component.includes('socialRank')) componentScores.socialRank = value;
+          else if (component.includes('economicStake')) componentScores.economicStake = value;
+          else if (component.includes('endorsementQuality')) componentScores.endorsementQuality = value;
+          else if (component.includes('temporalConsistency')) componentScores.temporalConsistency = value;
+          else if (component.includes('validation')) componentScores.validationScore = value;
+        }
+
+        if (row.sybilRisk) sybilRisk = parseFloat(row.sybilRisk?.value || row.sybilRisk);
+        if (row.behavioralAnomaly) behavioralAnomaly = parseFloat(row.behavioralAnomaly?.value || row.behavioralAnomaly);
+        
+        if (row.computedBy) provenance.computedBy = row.computedBy?.value || row.computedBy;
+        if (row.method) provenance.method = row.method?.value || row.method;
+        if (row.timestamp) provenance.timestamp = row.timestamp?.value || row.timestamp;
+      });
+
+      // Get overall score
+      return this.queryChatbotUserReputation(userDid, { includeBreakdown: false }).then(overall => ({
+        userDid,
+        overallScore: overall.overallScore,
+        componentScores: {
+          socialRank: componentScores.socialRank || 0,
+          economicStake: componentScores.economicStake || 0,
+          endorsementQuality: componentScores.endorsementQuality || 0,
+          temporalConsistency: componentScores.temporalConsistency || 0,
+          validationScore: componentScores.validationScore
+        },
+        sybilResistance: {
+          sybilRisk: sybilRisk || 0,
+          behavioralAnomaly: behavioralAnomaly || 0
+        },
+        provenance: {
+          ...provenance,
+          timestamp: provenance.timestamp || new Date().toISOString()
+        }
+      }));
+    });
+  }
+
+  /**
+   * Compare reputation scores between multiple chatbot users
+   * 
+   * Executes an optimized SPARQL query to retrieve and compare reputation
+   * scores for multiple users in a single query for efficiency.
+   * 
+   * @param userDids - Array of user DIDs to compare
+   * @returns Array of reputation scores sorted by overall score (descending)
+   * 
+   * @example
+   * ```typescript
+   * const comparison = await dkgClient.compareChatbotUserReputations([
+   *   'did:dkg:user:bot_alpha',
+   *   'did:dkg:user:bot_beta'
+   * ]);
+   * comparison.forEach(user => {
+   *   console.log(`${user.userDid}: ${user.overallScore}`);
+   * });
+   * ```
+   */
+  async compareChatbotUserReputations(
+    userDids: string[]
+  ): Promise<Array<{
+    userDid: string;
+    overallScore: number;
+    sybilRisk?: number;
+    lastUpdated: string;
+  }>> {
+    if (!userDids || userDids.length === 0) {
+      throw new Error('At least one user DID is required');
+    }
+
+    if (userDids.length > 100) {
+      throw new Error('Maximum 100 user DIDs allowed per comparison');
+    }
+
+    // Escape all DIDs
+    const escapedDids = userDids.map(did => `"${escapeSPARQLString(did)}"`).join(', ');
+
+    const query = `
+      PREFIX tm: <https://trust-marketplace.org/schema/v1/>
+      PREFIX prov: <http://www.w3.org/ns/prov#>
+      PREFIX dotrep: <https://dotrep.io/ontology/>
+      PREFIX schema: <https://schema.org/>
+      
+      SELECT ?user ?overallScore ?sybilRisk ?lastUpdated
+      WHERE {
+        {
+          ?reputation a tm:ReputationScore ;
+            tm:subject ?user ;
+            tm:compositeScore/tm:overall ?overallScore ;
+            prov:generatedAtTime ?lastUpdated .
+          
+          OPTIONAL {
+            ?reputation tm:sybilResistance/tm:sybilRisk ?sybilRisk .
+          }
+          
+          FILTER(?user IN (${escapedDids}))
+        }
+        UNION
+        {
+          ?profile a tm:TrustedUserProfile ;
+            tm:creator ?user ;
+            tm:reputationMetrics/tm:overallScore ?overallScore ;
+            schema:dateModified ?lastUpdated .
+          
+          FILTER(?user IN (${escapedDids}))
+        }
+        UNION
+        {
+          ?asset a schema:Person ;
+            schema:identifier ?user ;
+            dotrep:reputationScore ?overallScore ;
+            schema:dateModified ?lastUpdated .
+          
+          FILTER(?user IN (${escapedDids}))
+        }
+      }
+      ORDER BY DESC(?overallScore)
+    `;
+
+    if (this.useMockMode) {
+      console.log(`🔧 [MOCK] Comparing ${userDids.length} chatbot user reputations`);
+      return userDids.map((did, index) => ({
+        userDid: did,
+        overallScore: 0.75 - (index * 0.05),
+        sybilRisk: 0.15 + (index * 0.02),
+        lastUpdated: new Date().toISOString()
+      }));
+    }
+
+    return this.executeSafeQuery(query, 'SELECT').then((results: any) => {
+      // Handle both array results and wrapped results
+      const resultsArray = Array.isArray(results) ? results : (results.results || []);
+      
+      const getValue = (val: any): any => {
+        if (val && typeof val === 'object' && 'value' in val) return val.value;
+        return val;
+      };
+
+      const parseFloatValue = (val: any): number => {
+        const v = getValue(val);
+        const parsed = typeof v === 'string' ? parseFloat(v) : Number(v);
+        return isNaN(parsed) ? 0 : parsed;
+      };
+
+      return resultsArray.map((row: any) => ({
+        userDid: getValue(row.user) || '',
+        overallScore: parseFloatValue(row.overallScore),
+        sybilRisk: row.sybilRisk ? parseFloatValue(row.sybilRisk) : undefined,
+        lastUpdated: getValue(row.lastUpdated) || new Date().toISOString()
+      })).sort((a: { overallScore: number }, b: { overallScore: number }) => b.overallScore - a.overallScore);
+    });
+  }
+
+  /**
    * Query social network relationships (friendships, follows, collaborations)
    * 
    * Uses enhanced SPARQL queries for social network analysis

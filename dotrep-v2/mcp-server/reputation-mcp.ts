@@ -1728,46 +1728,123 @@ class DotRepMCPServer {
   }
 
   /**
-   * Query reputation scores
+   * Query reputation scores using enhanced SPARQL queries
+   * 
+   * Improved implementation that uses the comprehensive queryChatbotUserReputation
+   * method from DKG client, supporting multi-dimensional reputation metrics
+   * and trust marketplace schema.
    */
   private async queryReputationScores(args: any) {
-    const { user_did, metrics = ['social_rank', 'economic_stake', 'sybil_risk'] } = args;
+    const { 
+      user_did, 
+      metrics = ['social_rank', 'economic_stake', 'sybil_risk'],
+      include_breakdown = true,
+      include_sybil_risk = true,
+      include_temporal_metrics = false,
+      detailed = false
+    } = args;
 
     try {
-      const query = `
-        PREFIX dotrep: <https://dotrep.io/ontology/>
-        SELECT ?reputation ?socialRank ?economicStake
-        WHERE {
-          <${user_did}> dotrep:reputationScore ?reputation .
-          OPTIONAL { <${user_did}> dotrep:socialRank ?socialRank . }
-          OPTIONAL { <${user_did}> dotrep:economicStake ?economicStake . }
+      // Validate user DID
+      if (!user_did || typeof user_did !== 'string' || user_did.trim().length === 0) {
+        throw new Error('user_did must be a non-empty string');
+      }
+
+      // Use enhanced DKG client method for comprehensive reputation query
+      let reputationData: any;
+      
+      if (detailed) {
+        // Use detailed breakdown method
+        reputationData = await this.dkgClient.queryDetailedChatbotReputation(user_did);
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                user_did,
+                overall_score: reputationData.overallScore,
+                component_scores: {
+                  social_rank: reputationData.componentScores.socialRank,
+                  economic_stake: reputationData.componentScores.economicStake,
+                  endorsement_quality: reputationData.componentScores.endorsementQuality,
+                  temporal_consistency: reputationData.componentScores.temporalConsistency,
+                  validation_score: reputationData.componentScores.validationScore,
+                },
+                sybil_resistance: {
+                  sybil_risk: reputationData.sybilResistance.sybilRisk,
+                  behavioral_anomaly: reputationData.sybilResistance.behavioralAnomaly,
+                  cluster_detection: reputationData.sybilResistance.clusterDetection,
+                },
+                provenance: reputationData.provenance,
+                timestamp: new Date().toISOString(),
+              }, null, 2),
+            },
+          ],
+        };
+      } else {
+        // Use standard comprehensive query
+        reputationData = await this.dkgClient.queryChatbotUserReputation(user_did, {
+          includeBreakdown: include_breakdown,
+          includeSybilRisk: include_sybil_risk,
+          includeTemporalMetrics: include_temporal_metrics
+        });
+
+        // Build response based on requested metrics
+        const response: any = {
+          user_did,
+          overall_score: reputationData.overallScore,
+          last_updated: reputationData.lastUpdated,
+          timestamp: reputationData.timestamp,
+        };
+
+        if (include_breakdown && reputationData.componentScores) {
+          if (metrics.includes('social_rank') && reputationData.componentScores.socialRank !== undefined) {
+            response.social_rank = reputationData.componentScores.socialRank;
+          }
+          if (metrics.includes('economic_stake') && reputationData.componentScores.economicStake !== undefined) {
+            response.economic_stake = reputationData.componentScores.economicStake;
+          }
+          if (metrics.includes('endorsement_quality') && reputationData.componentScores.endorsementQuality !== undefined) {
+            response.endorsement_quality = reputationData.componentScores.endorsementQuality;
+          }
+          if (include_temporal_metrics && metrics.includes('temporal_consistency') && 
+              reputationData.componentScores.temporalConsistency !== undefined) {
+            response.temporal_consistency = reputationData.componentScores.temporalConsistency;
+          }
         }
-      `;
 
-      const results = await this.dkgClient.graphQuery(query, 'SELECT');
-      const result = results[0] || {};
+        if (include_sybil_risk) {
+          if (reputationData.sybilRisk !== undefined) {
+            response.sybil_risk = reputationData.sybilRisk;
+          }
+          if (reputationData.behavioralAnomaly !== undefined) {
+            response.behavioral_anomaly = reputationData.behavioralAnomaly;
+          }
+          
+          // Fallback: Get sybil risk from Sybil Detective if not in DKG data
+          if (response.sybil_risk === undefined && this.socialCreditAgents?.sybilDetective) {
+            try {
+              const sybilAnalysis = await this.socialCreditAgents.sybilDetective.analyzeAccount(user_did);
+              response.sybil_risk = sybilAnalysis.confidence || 0.5;
+              response.sybil_analysis_source = 'sybil_detective';
+            } catch (sybilError) {
+              console.warn(`Failed to get sybil analysis: ${sybilError}`);
+            }
+          }
+        }
 
-      // Get sybil risk from Sybil Detective
-      const sybilAnalysis = await this.socialCreditAgents.sybilDetective.analyzeAccount(user_did);
-      const sybilRisk = sybilAnalysis.confidence;
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              user_did,
-              reputation: parseFloat(result.reputation) || 0,
-              social_rank: parseFloat(result.socialRank) || 0,
-              economic_stake: parseFloat(result.economicStake) || 0,
-              sybil_risk: sybilRisk,
-              timestamp: new Date().toISOString(),
-            }, null, 2),
-          },
-        ],
-      };
-    } catch (error) {
-      throw new Error(`Failed to query reputation scores: ${error.message}`);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+        };
+      }
+    } catch (error: any) {
+      throw new Error(`Failed to query reputation scores: ${error.message || error}`);
     }
   }
 

@@ -24,6 +24,8 @@ import { DKGClientV8, DKGConfig, createDKGClientV8 } from './dkg-client-v8';
 import { ProvenanceAwareRetriever, RetrievalQuery, RetrievalResponse } from './drag-retriever';
 import { NeuroSymbolicKG, NeuroSymbolicQuery } from './neuro-symbolic-kg';
 import { ProvenanceRegistry } from './provenance-registry';
+import { X402AutonomousAgent, createX402AutonomousAgent } from '../server/_core/x402AutonomousAgent';
+import type { AgentPaymentConfig, AgentPaymentResult } from '../server/_core/x402AutonomousAgent';
 
 export interface AgentConfig {
   agentId: string;
@@ -37,6 +39,17 @@ export interface AgentConfig {
   maxMemorySize?: number;
   enableKnowledgeSharing?: boolean;
   agentSwarmId?: string; // ID for agent swarm/collective
+  /** x402 Payment configuration for autonomous agent payments */
+  x402Config?: {
+    payerAddress: string;
+    privateKey?: string;
+    facilitatorUrl?: string;
+    preferredChain?: 'base' | 'base-sepolia' | 'solana' | 'ethereum' | 'polygon' | 'arbitrum';
+    maxPaymentAmount?: number;
+    minRecipientReputation?: number;
+    enableNegotiation?: boolean;
+    trackPaymentEvidence?: boolean;
+  };
 }
 
 export interface AgentMemory {
@@ -74,6 +87,13 @@ export interface AgentResponse {
   provenanceScore: number; // Average provenance of sources
   reasoning?: string;
   metadata?: Record<string, any>;
+  /** Payment information if x402 was used */
+  paymentInfo?: {
+    amountPaid?: string;
+    chain?: string;
+    txHash?: string;
+    paymentUAL?: string; // UAL of payment evidence Knowledge Asset
+  };
 }
 
 export interface CollectiveMemoryQuery {
@@ -93,18 +113,37 @@ export interface CollectiveMemoryQuery {
  * Individual agent instance with dRAG capabilities and collective memory
  */
 export class DKGAIAgent {
-  private config: AgentConfig;
-  private dkgClient: DKGClientV8;
-  private retriever: ProvenanceAwareRetriever;
-  private neuroSymbolicKG: NeuroSymbolicKG;
-  private memory: AgentMemory;
-  private isActive: boolean = false;
+  protected config: AgentConfig;
+  protected dkgClient: DKGClientV8;
+  protected retriever: ProvenanceAwareRetriever;
+  protected neuroSymbolicKG: NeuroSymbolicKG;
+  protected memory: AgentMemory;
+  protected isActive: boolean = false;
+  /** x402 payment client for autonomous payments (optional) */
+  protected x402Agent?: X402AutonomousAgent;
 
   constructor(config: AgentConfig) {
     this.config = config;
     this.dkgClient = createDKGClientV8(config.dkgConfig);
     this.retriever = new ProvenanceAwareRetriever(this.dkgClient);
     this.neuroSymbolicKG = new NeuroSymbolicKG(this.dkgClient, this.retriever);
+    
+    // Initialize x402 payment client if configured
+    if (config.x402Config) {
+      const paymentConfig: AgentPaymentConfig = {
+        agentId: config.agentId,
+        payerAddress: config.x402Config.payerAddress,
+        privateKey: config.x402Config.privateKey,
+        facilitatorUrl: config.x402Config.facilitatorUrl,
+        preferredChain: config.x402Config.preferredChain || 'base',
+        maxPaymentAmount: config.x402Config.maxPaymentAmount || 1000.0,
+        minRecipientReputation: config.x402Config.minRecipientReputation || 0.5,
+        enableNegotiation: config.x402Config.enableNegotiation ?? true,
+        trackPaymentEvidence: config.x402Config.trackPaymentEvidence ?? true,
+      };
+      this.x402Agent = createX402AutonomousAgent(paymentConfig);
+      console.log(`💰 x402 payment client initialized for agent ${config.agentId}`);
+    }
     
     this.memory = {
       agentId: config.agentId,
@@ -133,17 +172,23 @@ export class DKGAIAgent {
       throw new Error(`DKG connection unhealthy for agent ${this.config.agentId}`);
     }
 
+    // x402 payment client is already initialized in constructor if configured
+    if (this.x402Agent) {
+      console.log(`💰 x402 payment integration enabled for agent ${this.config.agentName}`);
+    }
+
     this.isActive = true;
     console.log(`✅ Agent ${this.config.agentName} initialized and active`);
   }
 
   /**
-   * Process a query using dRAG (Decentralized RAG)
+   * Process a query using dRAG (Decentralized RAG) with optional x402 payment support
    * 
    * Uses the neuro-symbolic AI stack:
    * - Knowledge Base Layer: Queries DKG Knowledge Assets
    * - Trust Layer: Verifies provenance via blockchain
    * - Verifiable AI Layer: Performs dRAG with citations
+   * - Payment Layer: Automatically handles x402 payments for premium data access
    */
   async processQuery(
     query: string,
@@ -152,6 +197,12 @@ export class DKGAIAgent {
       minProvenanceScore?: number;
       topK?: number;
       requireCitations?: boolean;
+      /** Enable x402 payment for premium DKG queries */
+      enablePayment?: boolean;
+      /** Maximum payment amount for this query (overrides config) */
+      maxPaymentAmount?: number;
+      /** Premium DKG endpoint URL (if different from default) */
+      premiumEndpoint?: string;
     } = {}
   ): Promise<AgentResponse> {
     if (!this.isActive) {
@@ -164,10 +215,46 @@ export class DKGAIAgent {
       useHybrid = true,
       minProvenanceScore = 50,
       topK = 5,
-      requireCitations = true
+      requireCitations = true,
+      enablePayment = this.x402Agent !== undefined,
+      premiumEndpoint
     } = options;
 
+    let paymentInfo: AgentResponse['paymentInfo'] | undefined;
+    let paymentEvidenceUAL: string | undefined;
+
     try {
+      // If premium endpoint is specified and payment is enabled, try premium query first
+      if (enablePayment && premiumEndpoint && this.x402Agent) {
+        try {
+          console.log(`💰 Attempting premium query via x402 payment...`);
+          const paymentResult = await this.queryWithPayment(premiumEndpoint, query, options);
+          
+          if (paymentResult.success && paymentResult.data) {
+            paymentInfo = {
+              amountPaid: paymentResult.amountPaid,
+              chain: paymentResult.chain,
+              txHash: paymentResult.paymentProof?.txHash,
+            };
+
+            // Track payment evidence to DKG if enabled
+            if (paymentResult.paymentEvidence && this.config.x402Config?.trackPaymentEvidence) {
+              paymentEvidenceUAL = await this.publishPaymentEvidence(paymentResult.paymentEvidence);
+              if (paymentEvidenceUAL) {
+                paymentInfo.paymentUAL = paymentEvidenceUAL;
+                console.log(`✅ Payment evidence published to DKG: ${paymentEvidenceUAL}`);
+              }
+            }
+
+            // Use premium data directly
+            return this.formatPaymentResponse(query, paymentResult.data, paymentInfo);
+          }
+        } catch (paymentError) {
+          console.warn(`⚠️  Premium query with payment failed, falling back to standard query:`, paymentError);
+          // Fall through to standard query
+        }
+      }
+
       let retrievalResult: RetrievalResponse;
       let reasoning: string | undefined;
 
@@ -201,7 +288,7 @@ export class DKGAIAgent {
           citations: hybridResult.merged.map(r => r.ual)
         };
       } else {
-        // Use standard dRAG retrieval
+        // Use standard dRAG retrieval (with potential x402 payment handling)
         const retrievalQuery: RetrievalQuery = {
           query,
           topK,
@@ -259,6 +346,7 @@ export class DKGAIAgent {
         citations: retrievalResult.citations,
         provenanceScore: avgProvenance,
         reasoning,
+        paymentInfo,
         metadata: {
           totalResults: retrievalResult.totalResults,
           queryId: retrievalResult.queryId
@@ -342,52 +430,55 @@ export class DKGAIAgent {
 
     console.log(`🔍 Querying collective memory: "${query.query}"`);
 
-    // Use dRAG to search for relevant memories in DKG
-    const retrievalResult = await this.retriever.retrieve({
-      query: query.query,
-      topK: 20,
-      minProvenanceScore: query.minProvenanceScore || 50,
-      filterByType: ['reputation'], // Knowledge assets are stored as reputation assets
-      requireCitations: false
-    });
+      // Use dRAG to search for relevant memories in DKG
+      const retrievalResult = await this.retriever.retrieve({
+        query: query.query,
+        topK: 20,
+        minProvenanceScore: query.minProvenanceScore || 50,
+        filterByType: ['reputation'], // Knowledge assets are stored as reputation assets
+        requireCitations: false
+      });
 
-    // Filter by agent IDs if specified
-    const filteredResults = retrievalResult.results.filter(result => {
-      if (query.agentIds && query.agentIds.length > 0) {
-        const agentId = result.metadata?.agentId;
-        return agentId && query.agentIds.includes(agentId);
-      }
-      return true;
-    });
+      // Filter by agent IDs if specified
+      const filteredResults = retrievalResult.results.filter(result => {
+        if (query.agentIds && query.agentIds.length > 0) {
+          const agentId = result.metadata?.agentId as string | undefined;
+          return agentId && query.agentIds.includes(agentId);
+        }
+        return true;
+      });
 
-    // Convert to memory format
-    const memories: AgentMemory[] = [];
-    const agentMemoriesMap = new Map<string, AgentMemory>();
+      // Convert to memory format
+      const memories: AgentMemory[] = [];
+      const agentMemoriesMap = new Map<string, AgentMemory>();
 
-    for (const result of filteredResults) {
-      const agentId = result.metadata?.agentId || 'unknown';
-      
-      if (!agentMemoriesMap.has(agentId)) {
-        agentMemoriesMap.set(agentId, {
-          agentId,
-          memories: [],
-          lastUpdated: Date.now(),
-          totalSize: 0
+      for (const result of filteredResults) {
+        const agentId = (result.metadata?.agentId as string) || 'unknown';
+        const knowledgeType = result.metadata?.knowledgeType as string | undefined;
+        const publishedAt = result.metadata?.publishedAt as number | undefined;
+        const content = result.metadata?.content || result.text;
+        
+        if (!agentMemoriesMap.has(agentId)) {
+          agentMemoriesMap.set(agentId, {
+            agentId,
+            memories: [],
+            lastUpdated: Date.now(),
+            totalSize: 0
+          });
+        }
+
+        const memory = agentMemoriesMap.get(agentId)!;
+        memory.memories.push({
+          id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          type: knowledgeType === 'decision' ? 'decision' :
+                knowledgeType === 'pattern' ? 'learning' :
+                knowledgeType === 'insight' ? 'knowledge' : 'knowledge',
+          content: content,
+          timestamp: publishedAt || Date.now(),
+          ual: result.ual,
+          provenanceScore: result.provenanceScore
         });
       }
-
-      const memory = agentMemoriesMap.get(agentId)!;
-      memory.memories.push({
-        id: `memory-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: result.metadata?.knowledgeType === 'decision' ? 'decision' :
-              result.metadata?.knowledgeType === 'pattern' ? 'learning' :
-              result.metadata?.knowledgeType === 'insight' ? 'knowledge' : 'knowledge',
-        content: result.metadata?.content || result.text,
-        timestamp: result.metadata?.publishedAt || Date.now(),
-        ual: result.ual,
-        provenanceScore: result.provenanceScore
-      });
-    }
 
     return Array.from(agentMemoriesMap.values());
   }
@@ -585,6 +676,185 @@ export class DKGAIAgent {
   }
 
   /**
+   * Query premium DKG endpoint with x402 payment
+   * 
+   * Automatically handles HTTP 402 responses, executes payment,
+   * and retries with payment proof.
+   */
+  protected async queryWithPayment(
+    endpoint: string,
+    query: string,
+    options: {
+      maxPaymentAmount?: number;
+      topK?: number;
+      minProvenanceScore?: number;
+    }
+  ): Promise<AgentPaymentResult<RetrievalResponse>> {
+    if (!this.x402Agent) {
+      throw new Error('x402 payment client not initialized');
+    }
+
+    // Update max payment amount if specified
+    if (options.maxPaymentAmount) {
+      // Temporarily update config (in production, create new instance)
+      const originalMax = this.x402Agent['config'].maxPaymentAmount;
+      this.x402Agent['config'].maxPaymentAmount = options.maxPaymentAmount;
+      
+      try {
+        const result = await this.x402Agent.requestResource<RetrievalResponse>(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            query,
+            topK: options.topK || 5,
+            minProvenanceScore: options.minProvenanceScore || 50,
+            agentId: this.config.agentId,
+          }),
+        });
+        
+        return result;
+      } finally {
+        // Restore original config
+        this.x402Agent['config'].maxPaymentAmount = originalMax;
+      }
+    }
+
+    return await this.x402Agent.requestResource<RetrievalResponse>(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        topK: options.topK || 5,
+        minProvenanceScore: options.minProvenanceScore || 50,
+        agentId: this.config.agentId,
+      }),
+    });
+  }
+
+  /**
+   * Publish payment evidence to DKG as a Knowledge Asset
+   * 
+   * Creates a verifiable record of the payment transaction for
+   * reputation scoring and audit purposes.
+   */
+  protected async publishPaymentEvidence(
+    paymentEvidence: any
+  ): Promise<string | undefined> {
+    if (!this.x402Agent) {
+      return undefined;
+    }
+
+    try {
+      // Extract payment data from evidence
+      const paymentData = {
+        txHash: paymentEvidence.txHash || paymentEvidence.transactionHash,
+        payer: this.x402Agent['config'].payerAddress,
+        recipient: paymentEvidence.recipient || paymentEvidence.payee,
+        amount: paymentEvidence.amount || paymentEvidence.price,
+        currency: paymentEvidence.currency || 'USDC',
+        chain: paymentEvidence.chain || this.x402Agent['config'].preferredChain,
+        resourceUAL: paymentEvidence.resourceUAL || paymentEvidence.productUAL,
+        challenge: paymentEvidence.challenge,
+        facilitatorSig: paymentEvidence.facilitatorSig || paymentEvidence.facilitatorSignature,
+        signature: paymentEvidence.signature,
+        blockNumber: paymentEvidence.blockNumber,
+        timestamp: paymentEvidence.timestamp || new Date().toISOString(),
+      };
+
+      // Publish payment evidence to DKG
+      const result = await this.dkgClient.publishPaymentEvidence(paymentData, {
+        epochs: 2,
+        validateSchema: true,
+      });
+
+      console.log(`📝 Payment evidence published to DKG: ${result.UAL}`);
+      return result.UAL;
+    } catch (error) {
+      console.error(`❌ Failed to publish payment evidence:`, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Format response from premium paid query
+   */
+  protected async formatPaymentResponse(
+    query: string,
+    data: RetrievalResponse,
+    paymentInfo: AgentResponse['paymentInfo']
+  ): Promise<AgentResponse> {
+    const formattedResponse = await this.formatResponse(query, data);
+
+    const avgProvenance = data.results.length > 0
+      ? data.results.reduce((sum, r) => sum + r.provenanceScore, 0) / data.results.length
+      : 0;
+
+    const confidence = this.calculateConfidence(data, avgProvenance);
+
+    return {
+      agentId: this.config.agentId,
+      response: formattedResponse,
+      confidence,
+      citations: data.citations,
+      provenanceScore: avgProvenance,
+      paymentInfo,
+      metadata: {
+        totalResults: data.totalResults,
+        queryId: data.queryId,
+        paidQuery: true,
+      }
+    };
+  }
+
+  /**
+   * Query DKG with automatic payment retry for HTTP 402 responses
+   * 
+   * Enhanced query method that intercepts HTTP 402 Payment Required
+   * responses and automatically pays for premium data access.
+   */
+  async queryDKGWithAutoPayment<T = any>(
+    url: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    // If x402 agent is available, use it for automatic payment handling
+    if (this.x402Agent) {
+      const result = await this.x402Agent.requestResource<T>(url, options);
+      
+      if (result.success && result.data) {
+        // Track payment evidence if payment was made
+        if (result.paymentEvidence && this.config.x402Config?.trackPaymentEvidence) {
+          await this.publishPaymentEvidence(result.paymentEvidence);
+        }
+        
+        return result.data;
+      } else {
+        throw new Error(result.error || 'Payment-enabled query failed');
+      }
+    }
+
+    // Fallback to standard fetch (no payment handling)
+    const response = await fetch(url, options);
+    
+    if (response.status === 402) {
+      throw new Error(
+        'HTTP 402 Payment Required. Configure x402 payment client to enable automatic payments.'
+      );
+    }
+    
+    if (!response.ok) {
+      throw new Error(`Query failed with status ${response.status}`);
+    }
+    
+    return await response.json() as T;
+  }
+
+  /**
    * Get agent status
    */
   getStatus(): {
@@ -594,15 +864,35 @@ export class DKGAIAgent {
     memorySize: number;
     memoryCount: number;
     dkgStatus: any;
+    x402Enabled: boolean;
+    paymentStats?: {
+      totalPayments: number;
+      totalAmount: number;
+    };
   } {
-    return {
+    const status: any = {
       agentId: this.config.agentId,
       agentName: this.config.agentName,
       isActive: this.isActive,
       memorySize: this.memory.totalSize,
       memoryCount: this.memory.memories.length,
-      dkgStatus: this.dkgClient.getStatus()
+      dkgStatus: this.dkgClient.getStatus(),
+      x402Enabled: this.x402Agent !== undefined,
     };
+
+    if (this.x402Agent) {
+      const paymentHistory = this.x402Agent.getPaymentHistory();
+      status.paymentStats = {
+        totalPayments: paymentHistory.length,
+        totalAmount: paymentHistory.reduce((sum: number, evidence: any) => {
+          // Extract amount from evidence (simplified - would need proper parsing in production)
+          const amount = parseFloat(evidence.amount || evidence.price || '0');
+          return sum + amount;
+        }, 0),
+      };
+    }
+
+    return status;
   }
 
   /**
@@ -681,8 +971,8 @@ export class AgentOrchestrator {
     }
 
     try {
-      task.status = 'in_progress';
-      task.startedAt = Date.now();
+      agentTask.status = 'in_progress';
+      agentTask.startedAt = Date.now();
 
       let result: any;
       switch (task.taskType) {
@@ -703,16 +993,16 @@ export class AgentOrchestrator {
           throw new Error(`Unknown task type: ${task.taskType}`);
       }
 
-      task.status = 'completed';
-      task.result = result;
-      task.completedAt = Date.now();
-      task.citations = result.citations || [];
+      agentTask.status = 'completed';
+      agentTask.result = result;
+      agentTask.completedAt = Date.now();
+      agentTask.citations = result.citations || [];
 
-      return task;
+      return agentTask;
     } catch (error: any) {
-      task.status = 'failed';
-      task.error = error.message;
-      task.completedAt = Date.now();
+      agentTask.status = 'failed';
+      agentTask.error = error.message;
+      agentTask.completedAt = Date.now();
       throw error;
     }
   }

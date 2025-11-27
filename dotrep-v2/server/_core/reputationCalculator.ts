@@ -82,12 +82,14 @@ export interface ReputationCalculationRequest {
   algorithmWeights: Record<string, number>;
   timeDecayFactor: number;
   userId: string;
-  includeSafetyScore?: boolean; // Include Guardian safety score
+  includeSafetyScore?: boolean; // Include Guardian safety score (Umanitek Guardian dataset)
   onChainIdentity?: OnChainIdentity; // On-chain identity verification
   verifiedPayments?: VerifiedPayment[]; // x402 and other verified payments
   reputationRegistry?: ReputationRegistry; // Transaction-verified feedback
   includeHighlyTrustedDetermination?: boolean; // Calculate highly trusted status
   botDetectionResults?: BotDetectionResults; // Bot cluster detection results for reputation adjustment
+  publishToDKG?: boolean; // Auto-publish to OriginTrail DKG as Knowledge Asset
+  dkgClient?: any; // DKG client instance for publishing (optional)
 }
 
 export interface HighlyTrustedUserStatus {
@@ -140,6 +142,12 @@ export class ReputationCalculator {
 
   /**
    * Calculate reputation score with time decay and x402 protocol integration
+   * 
+   * Enhanced for OriginTrail hackathon with:
+   * - Automatic DKG publishing as Knowledge Assets
+   * - Guardian dataset integration for Sybil resistance
+   * - Three-layer architecture support (Agent-Knowledge-Trust)
+   * 
    * @throws {Error} If input validation fails
    */
   async calculateReputation(request: ReputationCalculationRequest): Promise<ReputationScore> {
@@ -155,7 +163,9 @@ export class ReputationCalculator {
       onChainIdentity,
       verifiedPayments = [],
       reputationRegistry,
-      includeHighlyTrustedDetermination = false
+      includeHighlyTrustedDetermination = false,
+      publishToDKG = false, // New option to auto-publish to DKG
+      dkgClient // Optional DKG client for publishing
     } = request;
 
     const now = Date.now();
@@ -188,7 +198,7 @@ export class ReputationCalculator {
       this.calculateRank(userId),
     ]);
 
-    // Get Guardian safety score if requested
+    // Get Guardian safety score if requested (Umanitek Guardian dataset integration)
     const { safetyScore, combinedScore } = includeSafetyScore
       ? await this.calculateSafetyScore(userId, overall)
       : { safetyScore: undefined, combinedScore: undefined };
@@ -205,7 +215,7 @@ export class ReputationCalculator {
         })
       : undefined;
 
-    return {
+    const reputationScore: ReputationScore = {
       overall: Math.round(Math.max(0, overall)), // Ensure non-negative
       breakdown: this.normalizeBreakdown(breakdown),
       percentile: Math.max(0, Math.min(100, percentile)), // Clamp to 0-100
@@ -217,6 +227,31 @@ export class ReputationCalculator {
       botDetectionPenalty: botDetectionPenalty > 0 ? botDetectionPenalty : undefined,
       sybilRisk: sybilRisk > 0 ? sybilRisk : undefined,
     };
+
+    // Auto-publish to DKG as Knowledge Asset (Knowledge Layer integration)
+    if (publishToDKG && dkgClient) {
+      try {
+        await this.publishReputationToDKG(
+          dkgClient,
+          userId,
+          reputationScore,
+          contributions,
+          {
+            safetyScore,
+            sybilRisk,
+            botDetectionPenalty,
+            highlyTrusted: highlyTrustedStatus?.isHighlyTrusted,
+            verifiedPayments: verifiedPayments.length,
+            onChainIdentity: onChainIdentity ? true : false
+          }
+        );
+      } catch (error) {
+        console.warn(`Failed to publish reputation to DKG for ${userId}:`, error);
+        // Don't fail the calculation if DKG publish fails
+      }
+    }
+
+    return reputationScore;
   }
 
   /**
@@ -986,4 +1021,71 @@ export class ReputationCalculator {
     ...this.HIGHLY_TRUSTED_THRESHOLDS,
     minRequirementsPassed: 5, // Minimum number of requirements that must pass
   };
+
+  /**
+   * Publish reputation score to OriginTrail DKG as a Knowledge Asset
+   * 
+   * This implements the Knowledge Layer of the three-layer architecture:
+   * - Stores reputation data as verifiable JSON-LD Knowledge Assets
+   * - Enables SPARQL queries for reputation insights
+   * - Creates provenance chains for reputation history
+   * - Supports MCP (Model Context Protocol) for AI agent queries
+   * 
+   * @param dkgClient - DKG client instance
+   * @param userId - User identifier
+   * @param reputationScore - Calculated reputation score
+   * @param contributions - User contributions
+   * @param metadata - Additional metadata to include
+   */
+  private async publishReputationToDKG(
+    dkgClient: any,
+    userId: string,
+    reputationScore: ReputationScore,
+    contributions: Contribution[],
+    metadata: Record<string, any>
+  ): Promise<void> {
+    try {
+      const reputationAsset = {
+        developerId: userId,
+        reputationScore: reputationScore.overall,
+        contributions: contributions.map(c => ({
+          id: c.id,
+          type: c.type as any,
+          url: '',
+          title: c.type,
+          date: new Date(c.timestamp).toISOString(),
+          impact: c.weight
+        })),
+        timestamp: Date.now(),
+        metadata: {
+          ...metadata,
+          breakdown: reputationScore.breakdown,
+          percentile: reputationScore.percentile,
+          rank: reputationScore.rank,
+          safetyScore: reputationScore.safetyScore,
+          combinedScore: reputationScore.combinedScore,
+          sybilRisk: reputationScore.sybilRisk,
+          botDetectionPenalty: reputationScore.botDetectionPenalty,
+          highlyTrusted: reputationScore.highlyTrustedStatus?.isHighlyTrusted,
+          trustLevel: reputationScore.highlyTrustedStatus?.trustLevel,
+          source: 'reputation_calculator',
+          version: '1.0.0',
+          // MCP metadata for AI agent integration
+          mcp: {
+            tool: 'reputation_score',
+            version: '1.0.0',
+            verifiable: true,
+            source: 'dotrep_reputation_calculator'
+          }
+        }
+      };
+
+      const result = await dkgClient.publishReputationAsset(reputationAsset, 2); // Store for 2 epochs
+      
+      console.log(`✅ Published reputation to DKG for ${userId}: ${result.UAL}`);
+    } catch (error) {
+      console.error(`❌ Failed to publish reputation to DKG for ${userId}:`, error);
+      throw error;
+    }
+  }
 }
