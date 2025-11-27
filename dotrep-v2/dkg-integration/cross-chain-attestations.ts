@@ -173,8 +173,11 @@ export class CrossChainAttestationVerifier {
 
     // 2. Verify block header (light client check)
     try {
+      const blockNumber = typeof attestation.blockNumber === 'number' 
+        ? attestation.blockNumber 
+        : parseInt(String(attestation.blockNumber), 10);
       const header = await this.polkadotApi.rpc.chain.getHeader(
-        this.polkadotApi.createType('BlockNumber', attestation.blockNumber)
+        blockNumber
       );
 
       const headerHash = header.hash.toString();

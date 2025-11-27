@@ -6,7 +6,8 @@
  */
 
 import { ProvenanceAwareRetriever, ProvenanceAwareResult } from './drag-retriever';
-import { DKGClient, DKGClientV8 } from './dkg-client';
+import { DKGClient } from './dkg-client';
+import { DKGClientV8 } from './dkg-client-v8';
 import { AdvancedGraphQueries } from './sparql/advanced-graph-queries';
 
 export interface NeuroSymbolicQuery {

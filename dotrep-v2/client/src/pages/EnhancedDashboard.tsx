@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   TrendingUp, 
@@ -42,9 +42,9 @@ const EnhancedDashboard: React.FC = () => {
     { enabled: !!contributor }
   );
 
-  const { data: achievements = [] } = trpc.achievement.list.useQuery(
-    { contributorId: contributor?.id || 0 },
-    { enabled: !!contributor }
+  const { data: achievements = [] } = trpc.achievement.getByContributor.useQuery(
+    { id: contributor?.id || 0 },
+    { enabled: !!contributor && !!contributor.id }
   );
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
@@ -53,7 +53,7 @@ const EnhancedDashboard: React.FC = () => {
 
   // Filter contributions based on time filter
   const filteredContributions = useMemo(() => {
-    if (!allContributions) return [];
+    if (!allContributions || allContributions.length === 0) return [];
     
     const now = Date.now();
     const filterTime = {
@@ -63,11 +63,25 @@ const EnhancedDashboard: React.FC = () => {
       'all': Infinity
     }[timeFilter];
 
-    return allContributions.filter((contribution: any) => {
-      const contributionTime = new Date(contribution.contributedAt || contribution.createdAt).getTime();
+    return allContributions.filter((contribution: { contributedAt?: string | Date; createdAt?: string | Date }) => {
+      const dateStr = contribution.contributedAt || contribution.createdAt;
+      if (!dateStr) return false;
+      const contributionTime = new Date(dateStr).getTime();
       return now - contributionTime <= filterTime;
     });
   }, [allContributions, timeFilter]);
+
+  const handleTimeFilterChange = useCallback((filter: TimeFilter) => {
+    setTimeFilter(filter);
+  }, []);
+
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+  }, []);
+
+  const handleTabChange = useCallback((tab: 'overview' | 'contributions' | 'network') => {
+    setActiveTab(tab);
+  }, []);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -138,13 +152,15 @@ const EnhancedDashboard: React.FC = () => {
                 {(['7d', '30d', '90d', 'all'] as TimeFilter[]).map((filter) => (
                   <button
                     key={filter}
-                    onClick={() => setTimeFilter(filter)}
+                    onClick={() => handleTimeFilterChange(filter)}
                     className={cn(
                       "px-3 py-1 text-sm font-medium rounded-md transition-colors duration-200",
                       timeFilter === filter
                         ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
                         : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                     )}
+                    aria-label={`Filter by ${filter === 'all' ? 'all time' : filter}`}
+                    aria-pressed={timeFilter === filter}
                   >
                     {filter === 'all' ? 'All Time' : filter}
                   </button>
@@ -154,24 +170,28 @@ const EnhancedDashboard: React.FC = () => {
               {/* View Mode Toggle */}
               <div className="flex items-center space-x-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
                 <button
-                  onClick={() => setViewMode('grid')}
+                  onClick={() => handleViewModeChange('grid')}
                   className={cn(
                     "p-2 rounded-md transition-colors duration-200",
                     viewMode === 'grid'
                       ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                   )}
+                  aria-label="Switch to grid view"
+                  aria-pressed={viewMode === 'grid'}
                 >
                   <Grid size={16} />
                 </button>
                 <button
-                  onClick={() => setViewMode('list')}
+                  onClick={() => handleViewModeChange('list')}
                   className={cn(
                     "p-2 rounded-md transition-colors duration-200",
                     viewMode === 'list'
                       ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
                   )}
+                  aria-label="Switch to list view"
+                  aria-pressed={viewMode === 'list'}
                 >
                   <List size={16} />
                 </button>
@@ -188,13 +208,16 @@ const EnhancedDashboard: React.FC = () => {
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
+                  onClick={() => handleTabChange(tab.id as 'overview' | 'contributions' | 'network')}
                   className={cn(
                     "flex items-center space-x-2 py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200",
                     activeTab === tab.id
                       ? "border-blue-500 text-blue-600 dark:text-blue-400"
                       : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                   )}
+                  aria-label={`Switch to ${tab.name} tab`}
+                  aria-selected={activeTab === tab.id}
+                  role="tab"
                 >
                   <tab.icon size={16} />
                   <span>{tab.name}</span>
@@ -222,7 +245,7 @@ const EnhancedDashboard: React.FC = () => {
                     {/* Reputation Score */}
                     {contributor ? (
                       <ReputationScoreCard
-                        score={contributor.totalReputationScore || 0}
+                        score={contributor.reputationScore || 0}
                         showBreakdown={true}
                         animated={true}
                       />
@@ -256,13 +279,13 @@ const EnhancedDashboard: React.FC = () => {
                         Recent Achievements
                       </h3>
                       <div className="space-y-3">
-                        {achievements.slice(0, 4).map((achievement: any, index: number) => (
+                        {achievements.slice(0, 4).map((achievement: { id?: number | string; name?: string }, index: number) => (
                           <div
                             key={achievement.id || index}
                             className="flex items-center justify-between p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300"
                           >
                             <span className="text-sm font-medium">{achievement.name || 'Achievement'}</span>
-                            <Star className="w-4 h-4 fill-current" />
+                            <Star className="w-4 h-4 fill-current" aria-hidden="true" />
                           </div>
                         ))}
                         {achievements.length === 0 && (

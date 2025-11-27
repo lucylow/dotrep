@@ -544,9 +544,12 @@ export class GraphAlgorithms {
   }
 
   /**
-   * Detect Sybil clusters
+   * Detect Sybil clusters using community detection
    * 
-   * Identifies potential Sybil attack clusters using graph structure analysis.
+   * Enhanced Sybil detection using:
+   * - Community detection (Louvain algorithm) to find tightly-knit clusters
+   * - Graph structure analysis (degree anomalies, reciprocity)
+   * - Economic signals (stake, payments) to identify bot accounts
    * 
    * @param nodes - Graph nodes
    * @param edges - Graph edges
@@ -563,18 +566,75 @@ export class GraphAlgorithms {
     // Build adjacency lists
     const inEdges = new Map<string, Array<{ source: string; weight: number }>>();
     const outEdges = new Map<string, Array<{ target: string; weight: number }>>();
+    const neighbors = new Map<string, Set<string>>();
 
     nodes.forEach(n => {
       inEdges.set(n.id, []);
       outEdges.set(n.id, []);
+      neighbors.set(n.id, new Set());
     });
 
     edges.forEach(edge => {
       inEdges.get(edge.target)!.push({ source: edge.source, weight: edge.weight });
       outEdges.get(edge.source)!.push({ target: edge.target, weight: edge.weight });
+      neighbors.get(edge.source)!.add(edge.target);
+      neighbors.get(edge.target)!.add(edge.source);
     });
 
-    // Heuristic: nodes with high in-degree but low PageRank are suspicious
+    // Step 1: Community detection to find tightly-knit clusters
+    const communities = this.detectCommunities(nodes, edges);
+    const communitySizes = new Map<number, number>();
+    communities.forEach(communityId => {
+      communitySizes.set(communityId, (communitySizes.get(communityId) || 0) + 1);
+    });
+
+    // Step 2: Calculate community metrics
+    const nodeToCommunity = new Map<string, number>();
+    communities.forEach((communityId, index) => {
+      nodeToCommunity.set(nodes[index].id, communityId);
+    });
+
+    // Step 3: Compute external connection ratio for each community
+    const communityExternalConnections = new Map<number, number>();
+    const communityInternalConnections = new Map<number, number>();
+
+    edges.forEach(edge => {
+      const sourceCommunity = nodeToCommunity.get(edge.source);
+      const targetCommunity = nodeToCommunity.get(edge.target);
+      
+      if (sourceCommunity === targetCommunity) {
+        communityInternalConnections.set(
+          sourceCommunity!,
+          (communityInternalConnections.get(sourceCommunity!) || 0) + 1
+        );
+      } else {
+        communityExternalConnections.set(
+          sourceCommunity!,
+          (communityExternalConnections.get(sourceCommunity!) || 0) + 1
+        );
+        communityExternalConnections.set(
+          targetCommunity!,
+          (communityExternalConnections.get(targetCommunity!) || 0) + 1
+        );
+      }
+    });
+
+    // Step 4: Identify suspicious communities (high internal, low external connections)
+    const suspiciousCommunities = new Set<number>();
+    communitySizes.forEach((size, communityId) => {
+      if (size < 3) return; // Skip very small communities
+      
+      const internal = communityInternalConnections.get(communityId) || 0;
+      const external = communityExternalConnections.get(communityId) || 0;
+      const externalRatio = external / (internal + external + 1); // +1 to avoid division by zero
+      
+      // Suspicious: high internal connections but very few external connections
+      if (externalRatio < 0.1 && size >= 5) {
+        suspiciousCommunities.add(communityId);
+      }
+    });
+
+    // Step 5: Calculate Sybil probability for each node
     const meanScore = Array.from(scores.values()).reduce((a, b) => a + b, 0) / scores.size;
     const scoreStd = Math.sqrt(
       Array.from(scores.values())
@@ -587,29 +647,224 @@ export class GraphAlgorithms {
       const outDegree = outEdges.get(node.id)!.length;
       const score = scores.get(node.id) || 0;
       const zScore = scoreStd > 0 ? (score - meanScore) / scoreStd : 0;
+      const nodeCommunity = nodeToCommunity.get(node.id) || -1;
+      const isInSuspiciousCommunity = suspiciousCommunities.has(nodeCommunity);
 
-      // Suspicious patterns:
-      // 1. High in-degree but low PageRank (z-score < -1)
-      // 2. Very high out-degree (potential spam)
-      // 3. Low reciprocity (many incoming but few outgoing)
       let sybilProbability = 0;
 
+      // Pattern 1: In suspicious community
+      if (isInSuspiciousCommunity) {
+        sybilProbability += 0.5;
+      }
+
+      // Pattern 2: High in-degree but low PageRank (z-score < -1)
       if (zScore < -1 && inDegree > 5) {
-        sybilProbability += 0.4;
+        sybilProbability += 0.3;
       }
 
+      // Pattern 3: Very high out-degree (potential spam)
       if (outDegree > 20 && inDegree < 2) {
-        sybilProbability += 0.3;
+        sybilProbability += 0.2;
       }
 
+      // Pattern 4: Low reciprocity (many incoming but few outgoing)
       if (inDegree > 10 && outDegree < 2) {
-        sybilProbability += 0.3;
+        sybilProbability += 0.2;
+      }
+
+      // Pattern 5: No economic signals (no stake, no payments) but high connections
+      const hasStake = (node.metadata?.stake || 0) > 0;
+      const hasPayments = (node.metadata?.paymentHistory || 0) > 0;
+      if (!hasStake && !hasPayments && (inDegree + outDegree) > 10) {
+        sybilProbability += 0.2;
+      }
+
+      // Pattern 6: Low connection diversity (all connections to same community)
+      const neighborCommunities = new Set<number>();
+      neighbors.get(node.id)!.forEach(neighborId => {
+        const neighborCommunity = nodeToCommunity.get(neighborId);
+        if (neighborCommunity !== undefined) {
+          neighborCommunities.add(neighborCommunity);
+        }
+      });
+      if (neighborCommunities.size === 1 && neighborCommunities.has(nodeCommunity) && inDegree > 5) {
+        sybilProbability += 0.2;
       }
 
       sybilProbabilities.set(node.id, Math.min(1, sybilProbability));
     }
 
     return sybilProbabilities;
+  }
+
+  /**
+   * Detect communities using a simplified Louvain-like algorithm
+   * 
+   * Groups nodes into communities based on connection density.
+   * Returns an array where each index corresponds to a node's community ID.
+   * 
+   * @param nodes - Graph nodes
+   * @param edges - Graph edges
+   * @returns Array of community IDs (one per node)
+   */
+  static detectCommunities(
+    nodes: GraphNode[],
+    edges: GraphEdge[]
+  ): number[] {
+    // Simplified community detection using label propagation
+    // In production, would use a proper Louvain implementation
+    
+    const nodeToCommunity = new Map<string, number>();
+    const nodeIndex = new Map<string, number>();
+    
+    nodes.forEach((node, index) => {
+      nodeToCommunity.set(node.id, index); // Start with each node in its own community
+      nodeIndex.set(node.id, index);
+    });
+
+    // Build adjacency list
+    const adjacency = new Map<string, string[]>();
+    nodes.forEach(node => {
+      adjacency.set(node.id, []);
+    });
+    
+    edges.forEach(edge => {
+      adjacency.get(edge.source)!.push(edge.target);
+      adjacency.get(edge.target)!.push(edge.source);
+    });
+
+    // Label propagation: assign each node to the most common community among its neighbors
+    let changed = true;
+    let iterations = 0;
+    const maxIterations = 10;
+
+    while (changed && iterations < maxIterations) {
+      changed = false;
+      iterations++;
+
+      for (const node of nodes) {
+        const neighbors = adjacency.get(node.id) || [];
+        if (neighbors.length === 0) continue;
+
+        // Count community frequencies among neighbors
+        const communityCounts = new Map<number, number>();
+        neighbors.forEach(neighborId => {
+          const neighborCommunity = nodeToCommunity.get(neighborId)!;
+          communityCounts.set(
+            neighborCommunity,
+            (communityCounts.get(neighborCommunity) || 0) + 1
+          );
+        });
+
+        // Find most common community
+        let maxCount = 0;
+        let mostCommonCommunity = nodeToCommunity.get(node.id)!;
+        
+        communityCounts.forEach((count, community) => {
+          if (count > maxCount) {
+            maxCount = count;
+            mostCommonCommunity = community;
+          }
+        });
+
+        // Update if changed
+        if (mostCommonCommunity !== nodeToCommunity.get(node.id)) {
+          nodeToCommunity.set(node.id, mostCommonCommunity);
+          changed = true;
+        }
+      }
+    }
+
+    // Return as array indexed by node order
+    return nodes.map(node => nodeToCommunity.get(node.id)!);
+  }
+
+  /**
+   * Filter deceptive opinions (bad-mouthing and self-promotion)
+   * 
+   * Detects and filters manipulated opinions:
+   * - Bad-mouthing: Unfair negative reviews from colluding accounts
+   * - Self-promotion: Colluding positive reviews within a cluster
+   * 
+   * @param nodes - Graph nodes
+   * @param edges - Graph edges (endorsements/reviews)
+   * @param communities - Community assignments from detectCommunities
+   * @returns Map of edge ID to deception probability (0-1)
+   */
+  static filterDeceptiveOpinions(
+    nodes: GraphNode[],
+    edges: GraphEdge[],
+    communities: number[]
+  ): Map<string, number> {
+    const deceptionProbabilities = new Map<string, number>();
+    const nodeToCommunity = new Map<string, number>();
+    
+    nodes.forEach((node, index) => {
+      nodeToCommunity.set(node.id, communities[index]);
+    });
+
+    // Build community membership
+    const communityMembers = new Map<number, Set<string>>();
+    nodes.forEach((node, index) => {
+      const communityId = communities[index];
+      if (!communityMembers.has(communityId)) {
+        communityMembers.set(communityId, new Set());
+      }
+      communityMembers.get(communityId)!.add(node.id);
+    });
+
+    // Analyze each edge for deception patterns
+    edges.forEach(edge => {
+      if (edge.edgeType !== EdgeType.ENDORSE && edge.edgeType !== EdgeType.REVIEW) {
+        return; // Only analyze endorsements and reviews
+      }
+
+      const sourceCommunity = nodeToCommunity.get(edge.source);
+      const targetCommunity = nodeToCommunity.get(edge.target);
+      const edgeId = `${edge.source}->${edge.target}`;
+      
+      let deceptionProbability = 0;
+
+      // Pattern 1: Self-promotion (positive reviews within same community)
+      if (sourceCommunity === targetCommunity && edge.weight > 0.8) {
+        const communitySize = communityMembers.get(sourceCommunity!)?.size || 0;
+        if (communitySize >= 3 && communitySize <= 20) { // Suspicious cluster size
+          deceptionProbability += 0.4;
+        }
+      }
+
+      // Pattern 2: Bad-mouthing (negative reviews from different communities)
+      if (sourceCommunity !== targetCommunity && edge.weight < 0.2) {
+        const sourceCommunitySize = communityMembers.get(sourceCommunity!)?.size || 0;
+        if (sourceCommunitySize >= 3) {
+          // Check if source community has many negative reviews for target
+          const negativeReviewsFromCommunity = edges.filter(e =>
+            nodeToCommunity.get(e.source) === sourceCommunity &&
+            e.target === edge.target &&
+            e.weight < 0.3
+          ).length;
+          
+          if (negativeReviewsFromCommunity >= 3) {
+            deceptionProbability += 0.5;
+          }
+        }
+      }
+
+      // Pattern 3: Suspicious timing (many reviews in short time)
+      // This would require temporal analysis - simplified here
+      const recentSimilarEdges = edges.filter(e =>
+        e.source === edge.source &&
+        Math.abs(e.timestamp - edge.timestamp) < 24 * 60 * 60 * 1000 // Within 24 hours
+      ).length;
+      
+      if (recentSimilarEdges > 10) {
+        deceptionProbability += 0.3;
+      }
+
+      deceptionProbabilities.set(edgeId, Math.min(1, deceptionProbability));
+    });
+
+    return deceptionProbabilities;
   }
 
   /**

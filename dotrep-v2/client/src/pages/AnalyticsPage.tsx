@@ -34,7 +34,7 @@ import {
   PolarRadiusAxis
 } from "recharts";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,38 +70,68 @@ export default function AnalyticsPage() {
     { enabled: !!selectedActor }
   );
 
-  const handleSearch = () => {
+  const handleSearch = useCallback(() => {
     if (actor.trim()) {
       setSelectedActor(actor.trim());
     }
-  };
+  }, [actor]);
 
-  // Transform data for charts
-  const contributionData = contributionsQuery.data?.data?.map((w) => ({
-    week: new Date(w.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    count: w.count
-  })) || [];
+  const handleActorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setActor(e.target.value);
+  }, []);
 
-  const reputationData = contributionData.map((d, i) => ({
-    week: d.week,
-    score: scoreQuery.data?.score?.finalScore || 0
-  }));
+  const handleWeeksChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(e.target.value);
+    if (!isNaN(value) && value >= 1 && value <= 52) {
+      setWeeks(value);
+    }
+  }, []);
 
-  const radarData = scoreQuery.data?.score?.vector ? [
-    { label: "Quality", value: scoreQuery.data.score.vector.quality },
-    { label: "Impact", value: scoreQuery.data.score.vector.impact },
-    { label: "Consistency", value: scoreQuery.data.score.vector.consistency },
-    { label: "Community", value: scoreQuery.data.score.vector.community }
-  ] : [];
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  }, [handleSearch]);
 
-  const stats = {
+  // Transform data for charts - memoized for performance
+  const contributionData = useMemo(() => {
+    if (!contributionsQuery.data?.data) return [];
+    return contributionsQuery.data.data.map((w) => ({
+      week: new Date(w.weekStart).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      count: w.count
+    }));
+  }, [contributionsQuery.data?.data]);
+
+  const reputationData = useMemo(() => {
+    return contributionData.map((d) => ({
+      week: d.week,
+      score: scoreQuery.data?.score?.finalScore || 0
+    }));
+  }, [contributionData, scoreQuery.data?.score?.finalScore]);
+
+  const radarData = useMemo(() => {
+    if (!scoreQuery.data?.score?.vector) return [];
+    return [
+      { label: "Quality", value: scoreQuery.data.score.vector.quality },
+      { label: "Impact", value: scoreQuery.data.score.vector.impact },
+      { label: "Consistency", value: scoreQuery.data.score.vector.consistency },
+      { label: "Community", value: scoreQuery.data.score.vector.community }
+    ];
+  }, [scoreQuery.data?.score?.vector]);
+
+  const stats = useMemo(() => ({
     totalContributions: contributionsQuery.data?.data?.reduce((sum, w) => sum + w.count, 0) || 0,
     totalReputation: scoreQuery.data?.score?.finalScore || 0,
     mergedRatio: mergedRatioQuery.data?.data?.merged_pct || 0,
     prTotal: mergedRatioQuery.data?.data?.pr_total || 0,
     prMerged: mergedRatioQuery.data?.data?.pr_merged || 0,
     anomalies: anomaliesQuery.data?.flagged?.length || 0,
-  };
+  }), [
+    contributionsQuery.data?.data,
+    scoreQuery.data?.score?.finalScore,
+    mergedRatioQuery.data?.data,
+    anomaliesQuery.data?.flagged?.length
+  ]);
 
   return (
     <UnifiedSidebar>
@@ -126,8 +156,9 @@ export default function AnalyticsPage() {
                   id="actor"
                   placeholder="github:username or wallet address"
                   value={actor}
-                  onChange={(e) => setActor(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  onChange={handleActorChange}
+                  onKeyDown={handleKeyDown}
+                  aria-label="Search actor by GitHub username or wallet address"
                   className="mt-2"
                 />
                 <p className="text-xs text-[#4F4F4F] mt-1">
@@ -142,11 +173,12 @@ export default function AnalyticsPage() {
                   min={1}
                   max={52}
                   value={weeks}
-                  onChange={(e) => setWeeks(parseInt(e.target.value) || 12)}
+                  onChange={handleWeeksChange}
+                  aria-label="Number of weeks to analyze"
                   className="mt-2"
                 />
               </div>
-              <Button onClick={handleSearch} className="mb-0">
+              <Button onClick={handleSearch} className="mb-0" aria-label="Search for actor analytics">
                 Search
               </Button>
             </div>

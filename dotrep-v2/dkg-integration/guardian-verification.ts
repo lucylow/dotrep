@@ -14,6 +14,13 @@
 import { DKGClientV8, DKGConfig } from './dkg-client-v8';
 import { GuardianVerificationResult, GuardianMatch } from '../server/_core/guardianApi';
 import { getImpactMetrics } from '../server/_core/impactMetrics';
+import { 
+  GuardianKnowledgeBase, 
+  getGuardianKnowledgeBase,
+  DecisionAction,
+  ActionPlan,
+  Decision
+} from './guardian-knowledge-base';
 
 export interface ContentVerificationAsset {
   '@context': (string | Record<string, string>)[];
@@ -57,14 +64,18 @@ export interface VerificationReportResult {
 export class GuardianVerificationService {
   private dkgClient: DKGClientV8;
   private impactMetrics: ReturnType<typeof getImpactMetrics>;
+  private knowledgeBase: GuardianKnowledgeBase;
 
   constructor(dkgClient?: DKGClientV8, dkgConfig?: DKGConfig) {
     this.dkgClient = dkgClient || new DKGClientV8(dkgConfig);
     this.impactMetrics = getImpactMetrics();
+    this.knowledgeBase = getGuardianKnowledgeBase(dkgClient, dkgConfig);
   }
 
   /**
    * Publish a verification report to the DKG as a Knowledge Asset
+   * 
+   * Enhanced with knowledge base integration for decision-making and policy enforcement
    */
   async publishVerificationReport(
     contentUrl: string,
@@ -74,11 +85,25 @@ export class GuardianVerificationService {
   ): Promise<VerificationReportResult> {
     console.log(`📤 Publishing Guardian verification report for ${contentUrl}`);
 
+    // Use knowledge base to evaluate verification result and make decision
+    const decision = await this.evaluateVerificationResult(verificationResult, {
+      contentUrl,
+      creatorId,
+      timestamp: verificationResult.timestamp,
+    });
+
+    // Log decision from knowledge base
+    console.log(`🤖 Guardian Knowledge Base decision: ${decision.action} (confidence: ${decision.confidence.toFixed(2)})`);
+    if (decision.recommendations && decision.recommendations.length > 0) {
+      console.log(`   Recommendations: ${decision.recommendations.join('; ')}`);
+    }
+
     // Convert to JSON-LD Knowledge Asset
     const knowledgeAsset = this.verificationToJSONLD(
       contentUrl,
       creatorId,
-      verificationResult
+      verificationResult,
+      decision
     );
 
     try {
@@ -114,6 +139,45 @@ export class GuardianVerificationService {
       console.error(`❌ Failed to publish verification report:`, error);
       throw new Error(`Failed to publish verification report: ${error.message}`);
     }
+  }
+
+  /**
+   * Evaluate verification result using knowledge base
+   */
+  private async evaluateVerificationResult(
+    verificationResult: GuardianVerificationResult,
+    context: Record<string, any>
+  ): Promise<Decision> {
+    // Create action plan from verification result
+    const actionPlan: ActionPlan = {
+      id: `verification-${Date.now()}`,
+      agentId: 'guardian-verification-service',
+      actions: [
+        {
+          type: 'content_verification',
+          target: context.contentUrl,
+          parameters: {
+            status: verificationResult.status,
+            confidence: verificationResult.confidence,
+            matches: verificationResult.matches,
+            recommendedAction: verificationResult.recommendedAction,
+          },
+        },
+      ],
+      timestamp: verificationResult.timestamp,
+      metadata: {
+        creatorId: context.creatorId,
+        contentType: verificationResult.fingerprint.metadata?.contentType,
+      },
+    };
+
+    // Evaluate using knowledge base
+    return await this.knowledgeBase.evaluateActionPlan(actionPlan, {
+      ...context,
+      verificationResult,
+      matchType: verificationResult.matches[0]?.matchType,
+      confidence: verificationResult.confidence,
+    });
   }
 
   /**
@@ -244,11 +308,13 @@ export class GuardianVerificationService {
 
   /**
    * Convert verification result to JSON-LD Knowledge Asset
+   * Enhanced with knowledge base decision information
    */
   private verificationToJSONLD(
     contentUrl: string,
     creatorId: string,
-    verificationResult: GuardianVerificationResult
+    verificationResult: GuardianVerificationResult,
+    decision?: Decision
   ): ContentVerificationAsset {
     return {
       '@context': [
@@ -284,7 +350,25 @@ export class GuardianVerificationService {
       wasDerivedFrom: verificationResult.matches
         .filter(m => m.sourceUAL)
         .map(m => ({ '@id': m.sourceUAL! })),
+      ...(decision ? {
+        'guardian:decision': {
+          '@type': 'guardian:GuardianDecision',
+          'guardian:action': decision.action,
+          'guardian:confidence': decision.confidence,
+          'guardian:reasoning': decision.reasoning,
+          'guardian:appliedPolicies': decision.appliedPolicies,
+          'guardian:riskLevel': decision.riskAssessment.level,
+          'guardian:recommendations': decision.recommendations,
+        },
+      } : {}),
     };
+  }
+
+  /**
+   * Get knowledge base instance
+   */
+  getKnowledgeBase(): GuardianKnowledgeBase {
+    return this.knowledgeBase;
   }
 
   /**

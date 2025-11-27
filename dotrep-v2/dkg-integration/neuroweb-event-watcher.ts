@@ -39,7 +39,10 @@ export interface NeuroWebWatcherConfig {
 export class NeuroWebEventWatcher {
   private api: ApiPromise | null = null;
   private wsProvider: WsProvider | null = null;
-  private config: Required<NeuroWebWatcherConfig>;
+  private config: NeuroWebWatcherConfig & {
+    rpcUrl: string;
+    useMockMode: boolean;
+  };
   private isWatching: boolean = false;
   private unsubscribe: (() => void) | null = null;
   private detectedAnchors: KAAnchorEvent[] = [];
@@ -54,12 +57,18 @@ export class NeuroWebEventWatcher {
       }
     };
 
+    // Determine network from env or default to testnet
+    const network = (getEnvVar('NEUROWEB_NETWORK') || 'testnet') as 'mainnet' | 'testnet';
+    const defaultRpc = network === 'mainnet'
+      ? 'wss://astrosat-parachain-rpc.origin-trail.network'
+      : 'wss://lofar-testnet.origin-trail.network';
+
     this.config = {
       rpcUrl: config.rpcUrl || 
                getEnvVar('NEUROWEB_RPC_URL') || 
                getEnvVar('POLKADOT_WS_ENDPOINT') || 
-               'wss://neuroweb-rpc.example', // Replace with actual NeuroWeb RPC
-      useMockMode: config.useMockMode ?? getEnvVar('NEUROWEB_USE_MOCK') === 'true' ?? false,
+               defaultRpc,
+      useMockMode: config.useMockMode ?? (getEnvVar('NEUROWEB_USE_MOCK') === 'true') ?? false,
       onAnchorDetected: config.onAnchorDetected,
       filterByUAL: config.filterByUAL,
     };

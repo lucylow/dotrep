@@ -1043,7 +1043,7 @@ export const appRouter = router({
             const calculator = new ReputationCalculator();
             return await calculator.calculateReputation({
               contributions: input.contributions,
-              algorithmWeights: input.algorithmWeights || {},
+              algorithmWeights: input.algorithmWeights ? Object.fromEntries(Object.entries(input.algorithmWeights).map(([k, v]) => [String(k), typeof v === 'number' ? v : 0])) : {},
               timeDecayFactor: input.timeDecayFactor || 0.01,
               userId: input.userId
             });
@@ -1473,250 +1473,6 @@ export const appRouter = router({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Failed to create agent Community Note',
           });
-        }
-      }),
-  }),
-
-  // Social Credit Marketplace Agent Layer
-  agents: router({
-    /**
-     * Find influencers using Trust Navigator Agent
-     */
-    findInfluencers: publicProcedure
-      .input(z.object({
-        query: z.union([z.string(), z.object({
-          targetAudience: z.string(),
-          minReputation: z.number().optional(),
-          maxSybilRisk: z.number().optional(),
-          platforms: z.array(z.string()).optional(),
-          specialties: z.array(z.string()).optional(),
-          budget: z.number().optional(),
-          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']).optional(),
-        })]),
-        limit: z.number().min(1).max(50).default(10),
-      }))
-      .query(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const polkadotApi = getPolkadotApi();
-          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
-          
-          const matches = await agents.trustNavigator.findInfluencers(input.query, input.limit);
-          return { success: true, matches };
-        } catch (error) {
-          logError(error, { operation: 'findInfluencers', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Detect Sybil clusters
-     */
-    detectSybilClusters: publicProcedure
-      .input(z.object({
-        accountIds: z.array(z.string()).optional(),
-        analysisDepth: z.number().min(1).max(5).default(3),
-      }))
-      .query(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
-          
-          // Mock graph data for demo
-          const graphData = (input.accountIds || []).map(id => ({
-            accountId: id,
-            reputation: 100,
-            contributions: [{ timestamp: Date.now(), block: 1 }],
-            connections: [],
-          }));
-          
-          const clusters = await agents.sybilDetective.detectSybilClusters(graphData);
-          return { success: true, clusters };
-        } catch (error) {
-          logError(error, { operation: 'detectSybilClusters', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Negotiate endorsement deal
-     */
-    negotiateDeal: publicProcedure
-      .input(z.object({
-        influencerDid: z.string(),
-        brandDid: z.string(),
-        campaignRequirements: z.object({
-          targetAudience: z.string(),
-          minReputation: z.number().optional(),
-          maxSybilRisk: z.number().optional(),
-          platforms: z.array(z.string()).optional(),
-          specialties: z.array(z.string()).optional(),
-          budget: z.number().optional(),
-          campaignType: z.enum(['product_launch', 'brand_awareness', 'event_promotion', 'content_creation']),
-        }),
-        initialTerms: z.object({
-          paymentAmount: z.number().optional(),
-          paymentToken: z.string().optional(),
-        }).optional(),
-      }))
-      .mutation(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const polkadotApi = getPolkadotApi();
-          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
-          
-          const deal = await agents.contractNegotiator.negotiateDeal(
-            input.influencerDid,
-            input.brandDid,
-            input.initialTerms || {},
-            input.campaignRequirements
-          );
-          
-          return { success: true, deal };
-        } catch (error) {
-          logError(error, { operation: 'negotiateDeal', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Setup x402 payment for deal
-     */
-    setupX402Payment: publicProcedure
-      .input(z.object({
-        dealId: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const polkadotApi = getPolkadotApi();
-          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
-          
-          // Get deal (would fetch from database in production)
-          const mockDeal = {
-            dealId: input.dealId,
-            influencerDid: 'did:influencer:1',
-            brandDid: 'did:brand:1',
-            terms: {
-              paymentAmount: 100,
-              paymentToken: 'DOT',
-              deliverables: [],
-              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
-            },
-            status: 'pending' as const,
-          };
-          
-          const x402Setup = await agents.contractNegotiator.setupX402Payment(mockDeal);
-          return { success: true, ...x402Setup };
-        } catch (error) {
-          logError(error, { operation: 'setupX402Payment', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Optimize campaign performance
-     */
-    optimizeCampaign: publicProcedure
-      .input(z.object({
-        campaignId: z.string(),
-        dealIds: z.array(z.string()),
-      }))
-      .query(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const agents = createSocialCreditAgents(dkgClient, getPolkadotApi());
-          
-          // Get deals (would fetch from database in production)
-          const mockDeals = input.dealIds.map(id => ({
-            dealId: id,
-            influencerDid: `did:influencer:${id}`,
-            brandDid: 'did:brand:1',
-            terms: {
-              paymentAmount: 100,
-              paymentToken: 'DOT',
-              deliverables: [],
-              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
-            },
-            status: 'active' as const,
-          }));
-          
-          const optimization = await agents.campaignOptimizer.optimizeCampaign(
-            input.campaignId,
-            mockDeals
-          );
-          
-          return { success: true, optimization };
-        } catch (error) {
-          logError(error, { operation: 'optimizeCampaign', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Verify reputation
-     */
-    verifyReputation: publicProcedure
-      .input(z.object({
-        did: z.string(),
-        includeHistory: z.boolean().default(false),
-      }))
-      .query(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const polkadotApi = getPolkadotApi();
-          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
-          
-          const verification = await agents.trustAuditor.verifyReputation(
-            input.did,
-            input.includeHistory
-          );
-          
-          return { success: true, verification };
-        } catch (error) {
-          logError(error, { operation: 'verifyReputation', input });
-          throw toTRPCError(error);
-        }
-      }),
-
-    /**
-     * Generate transparency report
-     */
-    generateTransparencyReport: publicProcedure
-      .input(z.object({
-        campaignId: z.string(),
-        dealIds: z.array(z.string()),
-      }))
-      .query(async ({ input }) => {
-        try {
-          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
-          const polkadotApi = getPolkadotApi();
-          const agents = createSocialCreditAgents(dkgClient, polkadotApi);
-          
-          // Get deals (would fetch from database in production)
-          const mockDeals = input.dealIds.map(id => ({
-            dealId: id,
-            influencerDid: `did:influencer:${id}`,
-            brandDid: 'did:brand:1',
-            terms: {
-              paymentAmount: 100,
-              paymentToken: 'DOT',
-              deliverables: [],
-              timeline: { start: Date.now(), end: Date.now() + 30 * 24 * 60 * 60 * 1000 },
-            },
-            status: 'active' as const,
-            receiptUAL: `ual:receipt:${id}`,
-          }));
-          
-          const report = await agents.trustAuditor.generateTransparencyReport(
-            input.campaignId,
-            mockDeals
-          );
-          
-          return { success: true, report };
-        } catch (error) {
-          logError(error, { operation: 'generateTransparencyReport', input });
-          throw toTRPCError(error);
         }
       }),
   }),
@@ -2215,6 +1971,146 @@ export const appRouter = router({
           throw toTRPCError(error);
         }
       }),
+
+    /**
+     * Identity Tokenomics: Create account with identity verification
+     */
+    createAccount: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+        walletAddress: z.string(),
+        stakeAmount: z.string().optional(), // BigInt as string
+        popProof: z.string().optional(),
+        popProvider: z.enum(['worldcoin', 'humanity', 'brightid', 'civic', 'custom']).optional(),
+        vouchedBy: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          const { createIdentityTokenomicsService } = await import('../dkg-integration/identity-tokenomics');
+          const { createDKGClientV8 } = await import('../dkg-integration/dkg-client-v8');
+          const { createTokenVerificationService } = await import('../dkg-integration/token-verification-service');
+          
+          const dkgClient = createDKGClientV8({
+            useMockMode: process.env.DKG_USE_MOCK === 'true',
+            enableTokenGating: false
+          });
+          
+          const tokenVerification = createTokenVerificationService({
+            dkgClient,
+            useMockMode: process.env.TOKEN_VERIFICATION_MOCK === 'true'
+          });
+          
+          const identityService = createIdentityTokenomicsService({
+            dkgClient,
+            tokenVerification,
+            accountCreation: {
+              requireStake: true,
+              minStakeAmount: BigInt(100) * BigInt(10 ** 18), // 100 tokens
+              stakeLockPeriod: 30,
+              requirePoP: false,
+              allowCommunityVouch: true
+            },
+            useMockMode: process.env.IDENTITY_TOKENOMICS_MOCK === 'true'
+          });
+          
+          const result = await identityService.createAccount(
+            input.userDID,
+            input.walletAddress,
+            {
+              stakeAmount: input.stakeAmount ? BigInt(input.stakeAmount) : undefined,
+              popProof: input.popProof,
+              popProvider: input.popProvider as any,
+              vouchedBy: input.vouchedBy
+            }
+          );
+          
+          return {
+            success: result.success,
+            accountCreated: result.accountCreated,
+            stakeRequired: result.stakeRequired,
+            stakeLocked: result.stakeLocked,
+            popVerified: result.popVerified,
+            sbtIssued: result.sbtIssued,
+            sbtCredential: result.sbtCredential ? {
+              credentialId: result.sbtCredential.credentialId,
+              credentialType: result.sbtCredential.credentialType,
+              recipientDID: result.sbtCredential.recipientDID,
+              issuedAt: result.sbtCredential.issuedAt,
+              dkgUAL: result.sbtCredential.dkgUAL
+            } : undefined,
+            error: result.error
+          };
+        } catch (error) {
+          logError(error, { operation: 'createAccount', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Identity Tokenomics: Get comprehensive trust score
+     */
+    getIdentityTrustScore: publicProcedure
+      .input(z.object({
+        userDID: z.string(),
+        walletAddress: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const { createIdentityTokenomicsService } = await import('../dkg-integration/identity-tokenomics');
+          const { createDKGClientV8 } = await import('../dkg-integration/dkg-client-v8');
+          const { createTokenVerificationService } = await import('../dkg-integration/token-verification-service');
+          
+          const dkgClient = createDKGClientV8({
+            useMockMode: process.env.DKG_USE_MOCK === 'true'
+          });
+          
+          const tokenVerification = createTokenVerificationService({
+            dkgClient,
+            useMockMode: process.env.TOKEN_VERIFICATION_MOCK === 'true'
+          });
+          
+          const identityService = createIdentityTokenomicsService({
+            dkgClient,
+            tokenVerification,
+            useMockMode: process.env.IDENTITY_TOKENOMICS_MOCK === 'true'
+          });
+          
+          const result = await identityService.getTrustScore(
+            input.userDID,
+            input.walletAddress
+          );
+          
+          return {
+            trustScore: result.trustScore,
+            components: result.components,
+            credentials: result.credentials.map(c => ({
+              credentialId: c.credentialId,
+              credentialType: c.credentialType,
+              recipientDID: c.recipientDID,
+              issuedAt: c.issuedAt,
+              dkgUAL: c.dkgUAL
+            })),
+            tcrEntry: result.tcrEntry ? {
+              applicantDID: result.tcrEntry.applicantDID,
+              status: result.tcrEntry.status,
+              totalStake: result.tcrEntry.totalStake.toString(),
+              createdAt: result.tcrEntry.createdAt
+            } : undefined,
+            behaviorAnalysis: result.behaviorAnalysis ? {
+              accountAddress: result.behaviorAnalysis.accountAddress,
+              totalTransactions: result.behaviorAnalysis.totalTransactions,
+              uniqueInteractions: result.behaviorAnalysis.uniqueInteractions,
+              sybilRiskScore: result.behaviorAnalysis.sybilRiskScore,
+              trustSignals: result.behaviorAnalysis.trustSignals,
+              riskSignals: result.behaviorAnalysis.riskSignals
+            } : undefined
+          };
+        } catch (error) {
+          logError(error, { operation: 'getIdentityTrustScore', input });
+          throw toTRPCError(error);
+        }
+      }),
+
   }),
 });
 

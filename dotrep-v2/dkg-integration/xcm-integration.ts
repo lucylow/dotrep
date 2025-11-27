@@ -64,14 +64,25 @@ export class XCMIntegration {
       }
     };
 
+    // Determine NeuroWeb network from env
+    const neurowebNetwork = (getEnvVar('NEUROWEB_NETWORK') || 'testnet') as 'mainnet' | 'testnet';
+    const neurowebParaId = neurowebNetwork === 'mainnet' ? 2043 : 20430;
+
+    const useMockEnv = getEnvVar('XCM_USE_MOCK');
+    const useMockMode = config.useMockMode ?? (useMockEnv === 'true' ? true : useMockEnv !== 'false');
+    
     this.config = {
       sourceChain: config.sourceChain || getEnvVar('XCM_SOURCE_CHAIN') || 'polkadot',
       targetChain: config.targetChain || getEnvVar('XCM_TARGET_CHAIN') || 'neuroweb',
-      useMockMode: config.useMockMode ?? getEnvVar('XCM_USE_MOCK') === 'true' ?? true,
-      onXCMReceived: config.onXCMReceived,
-      onXCMExecuted: config.onXCMExecuted,
+      useMockMode: useMockMode ?? true,
+      onXCMReceived: config.onXCMReceived || (async () => {}),
+      onXCMExecuted: config.onXCMExecuted || (async () => {}),
     };
     this.mockMode = this.config.useMockMode;
+
+    // Store NeuroWeb parachain ID for XCM construction
+    (this as any).neurowebParaId = neurowebParaId;
+    (this as any).neurowebNetwork = neurowebNetwork;
   }
 
   /**
@@ -343,6 +354,110 @@ export class XCMIntegration {
   clearHistory(): void {
     this.receivedMessages = [];
     console.log('🗑️  Cleared XCM message history');
+  }
+
+  /**
+   * Construct XCM MultiLocation for NeuroWeb parachain
+   * 
+   * Creates the proper MultiLocation format for targeting NeuroWeb
+   * from other parachains or the relay chain.
+   */
+  getNeuroWebMultiLocation(): any {
+    const paraId = (this as any).neurowebParaId || 20430; // Default to testnet
+    return {
+      V3: {
+        parents: 1, // From relay chain (0 = same chain, 1 = parent relay chain)
+        interior: {
+          X1: {
+            Parachain: paraId,
+          },
+        },
+      },
+    };
+  }
+
+  /**
+   * Construct XCM MultiLocation for NeuroWeb EVM account
+   * 
+   * For sending assets or messages to a specific account on NeuroWeb
+   */
+  getNeuroWebAccountMultiLocation(accountId: string): any {
+    const paraId = (this as any).neurowebParaId || 20430;
+    // Convert account to AccountId32 format
+    return {
+      V3: {
+        parents: 1,
+        interior: {
+          X2: [
+            { Parachain: paraId },
+            { AccountId32: { network: null, id: accountId } },
+          ],
+        },
+      },
+    };
+  }
+
+  /**
+   * Generate XCM v3 instruction for transferring assets to NeuroWeb
+   */
+  generateAssetTransferXCM(
+    recipient: string,
+    asset: {
+      token: string; // e.g., 'USDC', 'DOT', 'NEURO'
+      amount: string;
+    }
+  ): any {
+    const dest = this.getNeuroWebAccountMultiLocation(recipient);
+    return {
+      V3: [
+        {
+          WithdrawAsset: [
+            {
+              id: {
+                Concrete: {
+                  parents: 0,
+                  interior: {
+                    X1: { Token: asset.token },
+                  },
+                },
+              },
+              fun: { Fungible: asset.amount },
+            },
+          ],
+        },
+        {
+          DepositAsset: {
+            assets: { Wild: 'All' },
+            beneficiary: dest,
+          },
+        },
+      ],
+    };
+  }
+
+  /**
+   * Generate XCM v3 instruction for executing a transaction on NeuroWeb
+   * 
+   * This allows calling EVM contracts or Substrate pallets on NeuroWeb
+   * from another chain.
+   */
+  generateTransactXCM(
+    call: string, // Encoded call
+    maxWeight: bigint = BigInt(5000000000)
+  ): any {
+    return {
+      V3: [
+        {
+          Transact: {
+            originKind: 'SovereignAccount',
+            requireWeightAtMost: maxWeight,
+            call: {
+              encoded: call,
+            },
+          },
+        },
+      ],
+    };
   }
 }
 
