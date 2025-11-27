@@ -46,6 +46,7 @@ import {
 } from './did-signing';
 import { TokenomicsService, createTokenomicsService, type PublishCostEstimate } from './tokenomics-service';
 import { TokenVerificationService, createTokenVerificationService, type TokenVerificationConfig, GatedAction } from './token-verification-service';
+import { DataReliabilityService, createDataReliabilityService, type MerkleProof, type DataChunkVerification } from './data-reliability-service';
 
 export interface DKGConfig {
   endpoint?: string;
@@ -185,6 +186,7 @@ export class DKGClientV8 {
   private publisherKeyPair: DIDKeyPair | null = null;
   private tokenomics: TokenomicsService;
   private tokenVerification: TokenVerificationService | null = null;
+  private dataReliability: DataReliabilityService;
 
   constructor(config?: DKGConfig) {
     this.config = this.resolveConfig(config);
@@ -208,6 +210,11 @@ export class DKGClientV8 {
         useMockMode: this.useMockMode
       });
     }
+    
+    // Initialize data reliability service
+    // Note: We need to initialize this after construction is complete
+    // For now, create a temporary instance that will be replaced
+    this.dataReliability = createDataReliabilityService(this);
     
     // Initialize publisher key pair for signing
     if (config?.publisherKeyPair) {
@@ -515,6 +522,19 @@ export class DKGClientV8 {
         // Compute and log content hash
         if (validationResult.contentHash) {
           console.log(`🔐 Content hash: ${validationResult.contentHash}`);
+          
+          // Enhanced content hash verification using data reliability service
+          const hashVerification = this.dataReliability.verifyContentHash(
+            knowledgeAsset,
+            validationResult.contentHash,
+            { canonicalize: true }
+          );
+          
+          if (!hashVerification.valid) {
+            console.warn(`⚠️  Content hash verification warning: ${hashVerification.error}`);
+          } else {
+            console.log(`✅ Content hash verified successfully`);
+          }
         }
       }
 
@@ -572,11 +592,24 @@ export class DKGClientV8 {
 
   /**
    * Query reputation data from the DKG using a UAL
+   * Enhanced with data reliability verification
    * 
    * @param ual - Uniform Asset Locator for the reputation asset
+   * @param options - Query options
+   * @param options.verifyReliability - Verify data reliability (default: true)
+   * @param options.verifyContentHash - Verify content hash (default: true)
+   * @param options.verifyTemporalState - Verify temporal state freshness (default: true)
    * @returns Reputation data from the DKG
    */
-  async queryReputation(ual: string): Promise<any> {
+  async queryReputation(
+    ual: string,
+    options: {
+      verifyReliability?: boolean;
+      verifyContentHash?: boolean;
+      verifyTemporalState?: boolean;
+      maxAgeMs?: number;
+    } = {}
+  ): Promise<any> {
     if (!this.isInitialized) {
       throw new Error('DKG client not initialized');
     }
@@ -621,8 +654,35 @@ export class DKGClientV8 {
     return this.retryOperation(async () => {
       console.log(`🔍 Querying reputation asset: ${ual}`);
       const result = await this.dkg.asset.get(ual);
+      const asset = result.public || result.assertion;
+      
+      // Enhanced data reliability verification
+      const {
+        verifyReliability = true,
+        verifyContentHash = true,
+        verifyTemporalState = true,
+        maxAgeMs
+      } = options;
+      
+      if (verifyReliability) {
+        const reliabilityResult = await this.dataReliability.verifyDataReliability(ual, {
+          verifyContentHash,
+          verifyTemporalState,
+          maxAgeMs
+        });
+        
+        if (!reliabilityResult.reliable) {
+          console.warn(`⚠️  Data reliability verification failed for ${ual}:`, reliabilityResult.errors);
+        } else {
+          console.log(`✅ Data reliability verified for ${ual}`);
+          if (reliabilityResult.warnings && reliabilityResult.warnings.length > 0) {
+            console.warn(`⚠️  Reliability warnings:`, reliabilityResult.warnings);
+          }
+        }
+      }
+      
       console.log(`✅ Reputation asset retrieved successfully`);
-      return result.public || result.assertion;
+      return asset;
     }, 'Query reputation asset').catch((error) => {
       // Fallback to mock if enabled
       if (this.config.fallbackToMock || process.env.DKG_FALLBACK_TO_MOCK === 'true') {
@@ -1341,6 +1401,38 @@ export class DKGClientV8 {
    */
   getTokenVerificationService(): TokenVerificationService | null {
     return this.tokenVerification;
+  }
+
+  /**
+   * Get data reliability service instance
+   */
+  getDataReliabilityService(): DataReliabilityService {
+    return this.dataReliability;
+  }
+
+  /**
+   * Verify data chunk with Merkle proof
+   * Implements OriginTrail DKG's proof-of-knowledge system
+   */
+  async verifyDataChunk(
+    chunkId: string,
+    content: string | Buffer,
+    merkleProof?: MerkleProof
+  ): Promise<DataChunkVerification> {
+    return this.dataReliability.verifyDataChunk(chunkId, content, merkleProof);
+  }
+
+  /**
+   * Verify temporal state freshness
+   */
+  async verifyTemporalState(ual: string, maxAgeMs?: number): Promise<{
+    fresh: boolean;
+    ageMs: number;
+    error?: string;
+  }> {
+    const asset = await this.queryReputation(ual, { verifyReliability: false });
+    const state = await this.dataReliability.trackTemporalState(ual, asset);
+    return this.dataReliability.verifyTemporalState(state, maxAgeMs);
   }
 
   /**

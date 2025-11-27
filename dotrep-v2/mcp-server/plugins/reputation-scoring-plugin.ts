@@ -388,18 +388,35 @@ export class ReputationScoringPlugin extends BaseMCPPlugin {
     graphData: GraphData,
     userDid: string
   ): Promise<number> {
-    // Use bot detector to assess Sybil risk
-    const detectionResults = await this.botDetector.detectBotClusters(graphData);
-    const userCluster = detectionResults.suspiciousClusters.find(cluster =>
-      cluster.nodes.includes(userDid)
-    );
+    try {
+      // Convert graph data to format expected by bot detector
+      const botDetectorGraphData = this.convertToBotDetectorFormat(graphData);
+      // Create mock reputation scores (in production, fetch from service)
+      const reputationScores: Record<string, { finalScore: number }> = {};
+      graphData.nodes.forEach(node => {
+        reputationScores[node.id] = { finalScore: node.stake || 0.5 };
+      });
 
-    if (userCluster) {
-      // Lower resistance if in suspicious cluster
-      return Math.max(0.1, 1 - userCluster.suspicionScore);
+      // Use bot detector to assess Sybil risk
+      const detectionResults = await this.botDetector.detectBotClusters(
+        botDetectorGraphData as any,
+        reputationScores
+      );
+      const userCluster = detectionResults.suspiciousClusters.find(cluster =>
+        cluster.nodes.includes(userDid)
+      );
+
+      if (userCluster) {
+        // Lower resistance if in suspicious cluster
+        return Math.max(0.1, 1 - userCluster.suspicionScore);
+      }
+
+      return 1.0; // High resistance if not in suspicious cluster
+    } catch (error) {
+      // If detection fails, assume moderate resistance
+      console.warn('Sybil detection failed, using default resistance:', error);
+      return 0.7;
     }
-
-    return 1.0; // High resistance if not in suspicious cluster
   }
 
   /**
@@ -409,12 +426,51 @@ export class ReputationScoringPlugin extends BaseMCPPlugin {
     graphData: GraphData,
     userDid: string
   ): Promise<number> {
-    const detectionResults = await this.botDetector.detectBotClusters(graphData);
-    const userCluster = detectionResults.suspiciousClusters.find(cluster =>
-      cluster.nodes.includes(userDid)
-    );
+    try {
+      const botDetectorGraphData = this.convertToBotDetectorFormat(graphData);
+      const reputationScores: Record<string, { finalScore: number }> = {};
+      graphData.nodes.forEach(node => {
+        reputationScores[node.id] = { finalScore: node.stake || 0.5 };
+      });
 
-    return userCluster?.suspicionScore || 0;
+      const detectionResults = await this.botDetector.detectBotClusters(
+        botDetectorGraphData as any,
+        reputationScores
+      );
+      const userCluster = detectionResults.suspiciousClusters.find(cluster =>
+        cluster.nodes.includes(userDid)
+      );
+
+      return userCluster?.suspicionScore || 0;
+    } catch (error) {
+      console.warn('Sybil risk analysis failed:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Convert plugin graph data format to bot detector format
+   */
+  private convertToBotDetectorFormat(graphData: GraphData): {
+    nodes: Array<{ id: string; metadata?: { stake?: number; [key: string]: any } }>;
+    edges: Array<{ source: string; target: string; weight: number; edgeType?: string; timestamp?: number }>;
+  } {
+    // Convert to format expected by bot detector (GraphNode[] and GraphEdge[])
+    return {
+      nodes: graphData.nodes.map(node => ({
+        id: node.id,
+        metadata: {
+          stake: node.stake || 0,
+        },
+      })),
+      edges: graphData.edges.map(edge => ({
+        source: edge.source,
+        target: edge.target,
+        weight: edge.weight,
+        edgeType: 'endorsement', // Default edge type
+        timestamp: Date.now(),
+      })),
+    } as any; // Type assertion needed due to strict typing
   }
 
   /**
@@ -469,10 +525,24 @@ export class ReputationScoringPlugin extends BaseMCPPlugin {
     graphData: GraphData,
     sensitivity: number
   ): Promise<Array<{ nodes: string[]; suspicionScore: number }>> {
-    const detectionResults = await this.botDetector.detectBotClusters(graphData);
-    return detectionResults.suspiciousClusters.filter(
-      cluster => cluster.suspicionScore >= sensitivity
-    );
+    try {
+      const botDetectorGraphData = this.convertToBotDetectorFormat(graphData);
+      const reputationScores: Record<string, { finalScore: number }> = {};
+      graphData.nodes.forEach(node => {
+        reputationScores[node.id] = { finalScore: node.stake || 0.5 };
+      });
+
+      const detectionResults = await this.botDetector.detectBotClusters(
+        botDetectorGraphData as any,
+        reputationScores
+      );
+      return detectionResults.suspiciousClusters.filter(
+        cluster => cluster.suspicionScore >= sensitivity
+      );
+    } catch (error) {
+      console.warn('Cluster detection failed:', error);
+      return [];
+    }
   }
 
   /**

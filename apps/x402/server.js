@@ -319,7 +319,7 @@ function getChainExplorerUrl(chain) {
 
 /**
  * Validate payment proof from X-PAYMENT header
- * Enhanced with better structure validation and error messages
+ * Enhanced with better structure validation, nonce-based replay prevention, and time-bounded authorizations
  */
 function validatePaymentProof(proof, challenge) {
   // First, validate proof structure
@@ -348,6 +348,39 @@ function validatePaymentProof(proof, challenge) {
   // Validate challenge matches
   if (proof.challenge !== challenge) {
     return { valid: false, error: 'Challenge mismatch', code: 'CHALLENGE_MISMATCH' };
+  }
+
+  // Enhanced nonce-based replay prevention
+  // If proof includes a nonce, validate it separately from challenge
+  if (proof.nonce) {
+    // Check if nonce was already used (additional layer of replay protection)
+    const nonceKey = `nonce:${proof.nonce}:${proof.payer}`;
+    if (paymentSettlements.has(nonceKey)) {
+      return {
+        valid: false,
+        error: 'Nonce already used (replay attack detected)',
+        code: 'NONCE_REPLAY_DETECTED'
+      };
+    }
+  }
+
+  // Time-bounded authorization validation (EIP-712 compatible)
+  if (proof.validAfter && proof.validBefore) {
+    const now = Math.floor(Date.now() / 1000);
+    if (now < proof.validAfter) {
+      return {
+        valid: false,
+        error: `Authorization not yet valid. Valid after: ${new Date(proof.validAfter * 1000).toISOString()}`,
+        code: 'AUTHORIZATION_NOT_YET_VALID'
+      };
+    }
+    if (now > proof.validBefore) {
+      return {
+        valid: false,
+        error: `Authorization expired. Valid before: ${new Date(proof.validBefore * 1000).toISOString()}`,
+        code: 'AUTHORIZATION_EXPIRED'
+      };
+    }
   }
 
   // Validate amount and currency match policy (with tolerance for floating point)
@@ -423,7 +456,7 @@ function validatePaymentProof(proof, challenge) {
     }
   }
 
-  // Check for replay (txHash already used)
+  // Enhanced replay detection: Check both txHash and nonce
   if (paymentSettlements.has(proof.txHash)) {
     const existingSettlement = paymentSettlements.get(proof.txHash);
     return { 
@@ -432,9 +465,22 @@ function validatePaymentProof(proof, challenge) {
       code: 'REPLAY_DETECTED',
       details: {
         originalTimestamp: existingSettlement.timestamp,
-        originalResource: existingSettlement.resourceId
+        originalResource: existingSettlement.resourceId,
+        originalChallenge: existingSettlement.challenge
       }
     };
+  }
+
+  // Additional nonce-based replay check
+  if (proof.nonce) {
+    const nonceKey = `nonce:${proof.nonce}:${proof.payer}`;
+    if (paymentSettlements.has(nonceKey)) {
+      return {
+        valid: false,
+        error: 'Nonce already used for this payer (replay attack)',
+        code: 'NONCE_REPLAY_DETECTED'
+      };
+    }
   }
 
   return { valid: true, challengeData };
@@ -864,8 +910,27 @@ app.get('/api/:resource', async (req, res) => {
         }
       }
 
-      paymentSettlements.set(proof.txHash, { ...settlement, timestamp: Date.now() });
+      // Store settlement with enhanced replay protection
+      paymentSettlements.set(proof.txHash, { 
+        ...settlement, 
+        timestamp: Date.now(),
+        challenge: proof.challenge,
+        resourceId: challengeData.policy.resourceUAL,
+        payer: proof.payer
+      });
       paymentProofs.set(proof.txHash, proof);
+      
+      // Also store by nonce if provided (additional replay protection)
+      if (proof.nonce) {
+        const nonceKey = `nonce:${proof.nonce}:${proof.payer}`;
+        paymentSettlements.set(nonceKey, {
+          ...settlement,
+          timestamp: Date.now(),
+          challenge: proof.challenge,
+          txHash: proof.txHash,
+          nonce: proof.nonce
+        });
+      }
 
       // Publish Payment Evidence KA using improved publisher
       const paymentData = {
@@ -992,8 +1057,27 @@ app.get('/api/ecommerce/product/:productUAL/provenance', async (req, res) => {
       }
 
       // Mark as settled
-      paymentSettlements.set(proof.txHash, { ...settlement, timestamp: Date.now() });
+      // Store settlement with enhanced replay protection
+      paymentSettlements.set(proof.txHash, { 
+        ...settlement, 
+        timestamp: Date.now(),
+        challenge: proof.challenge,
+        resourceId: challengeData.policy.resourceUAL,
+        payer: proof.payer
+      });
       paymentProofs.set(proof.txHash, proof);
+      
+      // Also store by nonce if provided (additional replay protection)
+      if (proof.nonce) {
+        const nonceKey = `nonce:${proof.nonce}:${proof.payer}`;
+        paymentSettlements.set(nonceKey, {
+          ...settlement,
+          timestamp: Date.now(),
+          challenge: proof.challenge,
+          txHash: proof.txHash,
+          nonce: proof.nonce
+        });
+      }
 
       // Publish Payment Evidence KA
       const paymentData = {
@@ -1554,8 +1638,27 @@ app.post('/api/marketplace/purchase', async (req, res) => {
         return res.status(402).json({ error: 'Payment Required', message: 'Payment not verified' });
       }
 
-      paymentSettlements.set(proof.txHash, { ...settlement, timestamp: Date.now() });
+      // Store settlement with enhanced replay protection
+      paymentSettlements.set(proof.txHash, { 
+        ...settlement, 
+        timestamp: Date.now(),
+        challenge: proof.challenge,
+        resourceId: challengeData.policy.resourceUAL,
+        payer: proof.payer
+      });
       paymentProofs.set(proof.txHash, proof);
+      
+      // Also store by nonce if provided (additional replay protection)
+      if (proof.nonce) {
+        const nonceKey = `nonce:${proof.nonce}:${proof.payer}`;
+        paymentSettlements.set(nonceKey, {
+          ...settlement,
+          timestamp: Date.now(),
+          challenge: proof.challenge,
+          txHash: proof.txHash,
+          nonce: proof.nonce
+        });
+      }
 
       // Publish Payment Evidence KA
       const paymentData = {
@@ -1778,3 +1881,4 @@ app.listen(PORT, () => {
   console.log(`   - GET  /api/marketplace/discover - Discover data products`);
   console.log(`   - POST /api/marketplace/purchase - Purchase data product via x402`);
 });
+

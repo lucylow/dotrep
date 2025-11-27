@@ -3,11 +3,22 @@
  * 
  * Provides AI agents with tools to query reputation data from the DKG.
  * These tools can be integrated with MCP-compatible AI agents.
+ * 
+ * Updated to follow MCP standardization patterns.
  */
 
 import { SocialGraphReputationService, MCPReputationQuery } from './social-graph-reputation-service';
 import { DKGClientV8 } from './dkg-client-v8';
+import {
+  MCPStandardTool,
+  MCPStandardToolResult,
+  createMCPTool,
+  createMCPProperty,
+  createMCPToolResult,
+  createMCPError,
+} from '../mcp-server/types/mcp-standard';
 
+// Legacy interface for backward compatibility
 export interface MCPToolDefinition {
   name: string;
   description: string;
@@ -18,6 +29,7 @@ export interface MCPToolDefinition {
   };
 }
 
+// Legacy interface for backward compatibility
 export interface MCPToolResult {
   success: boolean;
   data?: any;
@@ -37,118 +49,168 @@ export class MCPReputationTools {
   }
 
   /**
-   * Get available MCP tools
+   * Get available MCP tools (standardized format)
    */
-  getToolDefinitions(): MCPToolDefinition[] {
+  getToolDefinitions(): MCPStandardTool[] {
     return [
-      {
-        name: 'get_user_reputation',
-        description: 'Query reputation score and trust assessment for a user by their DID',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            userDID: {
-              type: 'string',
-              description: 'The user\'s Decentralized Identifier (DID)'
-            },
-            includeSybilRisk: {
-              type: 'boolean',
-              description: 'Whether to include Sybil risk assessment (default: true)',
-              default: true
-            },
-            includeConfidence: {
-              type: 'boolean',
-              description: 'Whether to include confidence score (default: true)',
-              default: true
-            }
-          },
-          required: ['userDID']
+      createMCPTool(
+        'get_user_reputation',
+        'Query reputation score and trust assessment for a user by their DID. Returns verifiable data from the OriginTrail DKG with Sybil resistance analysis.',
+        {
+          userDID: createMCPProperty('string', 'The user\'s Decentralized Identifier (DID)', {
+            examples: ['did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'],
+          }),
+          includeSybilRisk: createMCPProperty('boolean', 'Whether to include Sybil risk assessment', {
+            default: true,
+          }),
+          includeConfidence: createMCPProperty('boolean', 'Whether to include confidence score', {
+            default: true,
+          }),
+        },
+        ['userDID']
+      ),
+      createMCPTool(
+        'get_top_creators',
+        'Get top N creators by reputation score, filtered for Sybil accounts. Returns ranked list with reputation metrics.',
+        {
+          limit: createMCPProperty('number', 'Number of top creators to return', {
+            default: 10,
+            minimum: 1,
+            maximum: 100,
+          }),
         }
-      },
-      {
-        name: 'get_top_creators',
-        description: 'Get top N creators by reputation score, filtered for Sybil accounts',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            limit: {
-              type: 'number',
-              description: 'Number of top creators to return (default: 10, max: 100)',
-              default: 10,
-              minimum: 1,
-              maximum: 100
-            }
-          }
-        }
-      },
-      {
-        name: 'get_latest_snapshot',
-        description: 'Get the latest reputation snapshot from the DKG',
-        inputSchema: {
-          type: 'object',
-          properties: {}
-        }
-      },
-      {
-        name: 'assess_trust_level',
-        description: 'Assess trust level for a user based on reputation score',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            userDID: {
-              type: 'string',
-              description: 'The user\'s Decentralized Identifier (DID)'
-            }
-          },
-          required: ['userDID']
-        }
-      }
+      ),
+      createMCPTool(
+        'get_latest_snapshot',
+        'Get the latest reputation snapshot from the DKG. Returns snapshot metadata, algorithm version, and provenance information.',
+        {}
+      ),
+      createMCPTool(
+        'assess_trust_level',
+        'Assess trust level for a user based on reputation score. Provides trust level classification and recommendations.',
+        {
+          userDID: createMCPProperty('string', 'The user\'s Decentralized Identifier (DID)'),
+        },
+        ['userDID']
+      ),
     ];
   }
 
   /**
-   * Execute MCP tool
+   * Get legacy tool definitions (for backward compatibility)
+   */
+  getLegacyToolDefinitions(): MCPToolDefinition[] {
+    return this.getToolDefinitions().map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
+  }
+
+  /**
+   * Execute MCP tool (standardized format)
    */
   async executeTool(
     toolName: string,
     parameters: Record<string, any>
-  ): Promise<MCPToolResult> {
+  ): Promise<MCPStandardToolResult> {
     try {
+      const startTime = Date.now();
+      let result: MCPStandardToolResult;
+
       switch (toolName) {
         case 'get_user_reputation':
-          return await this.getUserReputation(parameters);
+          result = await this.getUserReputationStandardized(parameters as {
+            userDID: string;
+            includeSybilRisk?: boolean;
+            includeConfidence?: boolean;
+          });
+          break;
         
         case 'get_top_creators':
-          return await this.getTopCreators(parameters);
+          result = await this.getTopCreatorsStandardized(parameters as { limit?: number });
+          break;
         
         case 'get_latest_snapshot':
-          return await this.getLatestSnapshot(parameters);
+          result = await this.getLatestSnapshotStandardized(parameters);
+          break;
         
         case 'assess_trust_level':
-          return await this.assessTrustLevel(parameters);
+          result = await this.assessTrustLevelStandardized(parameters as { userDID: string });
+          break;
         
         default:
-          return {
-            success: false,
-            error: `Unknown tool: ${toolName}`
-          };
+          return createMCPError(`Unknown tool: ${toolName}`, 'TOOL_NOT_FOUND');
       }
+
+      // Add execution metadata
+      if (result.metadata) {
+        result.metadata.executionTime = Date.now() - startTime;
+      } else {
+        result.metadata = {
+          executionTime: Date.now() - startTime,
+        };
+      }
+
+      return result;
+    } catch (error: any) {
+      return createMCPError(error, 'TOOL_EXECUTION_ERROR');
+    }
+  }
+
+  /**
+   * Execute MCP tool (legacy format for backward compatibility)
+   */
+  async executeToolLegacy(
+    toolName: string,
+    parameters: Record<string, any>
+  ): Promise<MCPToolResult> {
+    try {
+      const result = await this.executeTool(toolName, parameters);
+      
+      if (result.isError) {
+        const errorText = result.content[0]?.text || 'Unknown error';
+        const errorData = JSON.parse(errorText);
+        return {
+          success: false,
+          error: errorData.error?.message || 'Tool execution failed',
+        };
+      }
+
+      const dataText = result.content[0]?.text || '{}';
+      const data = JSON.parse(dataText);
+
+      return {
+        success: true,
+        data,
+      };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || 'Tool execution failed'
+        error: error.message || 'Tool execution failed',
       };
     }
   }
 
   /**
-   * Tool: Get user reputation
+   * Tool: Get user reputation (standardized)
+   */
+  private async getUserReputationStandardized(params: {
+    userDID: string;
+    includeSybilRisk?: boolean;
+    includeConfidence?: boolean;
+  }): Promise<MCPStandardToolResult> {
+    return await this.getUserReputation(params);
+  }
+
+  /**
+   * Tool: Get user reputation (legacy)
    */
   private async getUserReputation(params: {
     userDID: string;
     includeSybilRisk?: boolean;
     includeConfidence?: boolean;
-  }): Promise<MCPToolResult> {
+  }): Promise<MCPStandardToolResult> {
     const query: MCPReputationQuery = {
       userDID: params.userDID,
       includeSybilRisk: params.includeSybilRisk !== false,
@@ -160,7 +222,7 @@ export class MCPReputationTools {
     const data: any = {
       user: result.user,
       reputationScore: result.reputationScore,
-      trustLevel: result.trustLevel
+      trustLevel: result.trustLevel,
     };
 
     if (query.includeSybilRisk) {
@@ -173,84 +235,98 @@ export class MCPReputationTools {
       data.dataProvenance = result.dataProvenance;
     }
 
-    return {
-      success: true,
-      data
-    };
+    return createMCPToolResult(data, {
+      metadata: {
+        dataProvenance: result.dataProvenance || {
+          source: 'dkg-reputation-service',
+          timestamp: Date.now(),
+          verified: true,
+        },
+      },
+    });
+  }
+
+  /**
+   * Tool: Get top creators (standardized)
+   */
+  private async getTopCreatorsStandardized(params: { limit?: number }): Promise<MCPStandardToolResult> {
+    return await this.getTopCreators(params);
   }
 
   /**
    * Tool: Get top creators
    */
-  private async getTopCreators(params: { limit?: number }): Promise<MCPToolResult> {
+  private async getTopCreators(params: { limit?: number }): Promise<MCPStandardToolResult> {
     const limit = Math.min(Math.max(1, params.limit || 10), 100);
     
     const creators = await this.reputationService.getTopCreators(limit);
 
-    return {
-      success: true,
-      data: {
-        creators: creators.map(c => ({
-          user: c['schema:user'],
-          reputationScore: c['reputation:value'],
-          percentile: c['reputation:percentile'],
-          confidence: c['reputation:confidence'],
-          stakeAmount: c['reputation:stakeAmount']
-        })),
-        count: creators.length
-      }
-    };
+    return createMCPToolResult({
+      creators: creators.map(c => ({
+        user: c['schema:user'],
+        reputationScore: c['reputation:value'],
+        percentile: c['reputation:percentile'],
+        confidence: c['reputation:confidence'],
+        stakeAmount: c['reputation:stakeAmount'],
+      })),
+      count: creators.length,
+    });
+  }
+
+  /**
+   * Tool: Get latest snapshot (standardized)
+   */
+  private async getLatestSnapshotStandardized(_params: {}): Promise<MCPStandardToolResult> {
+    return await this.getLatestSnapshot(_params);
   }
 
   /**
    * Tool: Get latest snapshot
    */
-  private async getLatestSnapshot(_params: {}): Promise<MCPToolResult> {
+  private async getLatestSnapshot(_params: {}): Promise<MCPStandardToolResult> {
     const snapshot = await this.reputationService.getLatestReputationSnapshot();
 
     if (!snapshot) {
-      return {
-        success: false,
-        error: 'No reputation snapshot found'
-      };
+      return createMCPError('No reputation snapshot found', 'SNAPSHOT_NOT_FOUND');
     }
 
-    return {
-      success: true,
-      data: {
-        snapshotId: snapshot['@id'],
-        dateCreated: snapshot['schema:dateCreated'],
-        algorithm: snapshot['reputation:algorithm'],
-        totalScores: snapshot['reputation:scores'].length,
-        sybilAnalysis: snapshot['reputation:sybilAnalysis'],
-        provenance: snapshot['reputation:provenance']
-      }
-    };
+    return createMCPToolResult({
+      snapshotId: snapshot['@id'],
+      dateCreated: snapshot['schema:dateCreated'],
+      algorithm: snapshot['reputation:algorithm'],
+      totalScores: snapshot['reputation:scores']?.length || 0,
+      sybilAnalysis: snapshot['reputation:sybilAnalysis'],
+      provenance: snapshot['reputation:provenance'],
+    });
+  }
+
+  /**
+   * Tool: Assess trust level (standardized)
+   */
+  private async assessTrustLevelStandardized(params: { userDID: string }): Promise<MCPStandardToolResult> {
+    return await this.assessTrustLevel(params);
   }
 
   /**
    * Tool: Assess trust level
    */
-  private async assessTrustLevel(params: { userDID: string }): Promise<MCPToolResult> {
+  private async assessTrustLevel(params: { userDID: string }): Promise<MCPStandardToolResult> {
     const query: MCPReputationQuery = {
       userDID: params.userDID,
       includeSybilRisk: true,
-      includeConfidence: true
+      includeConfidence: true,
     };
 
     const result = await this.reputationService.queryUserReputation(query);
 
-    return {
-      success: true,
-      data: {
-        user: result.user,
-        trustLevel: result.trustLevel,
-        reputationScore: result.reputationScore,
-        sybilRisk: result.sybilRisk,
-        confidence: result.confidence,
-        recommendation: this.getTrustRecommendation(result.trustLevel, result.sybilRisk)
-      }
-    };
+    return createMCPToolResult({
+      user: result.user,
+      trustLevel: result.trustLevel,
+      reputationScore: result.reputationScore,
+      sybilRisk: result.sybilRisk,
+      confidence: result.confidence,
+      recommendation: this.getTrustRecommendation(result.trustLevel, result.sybilRisk),
+    });
   }
 
   /**
@@ -293,4 +369,5 @@ export function createMCPReputationTools(
 }
 
 export default MCPReputationTools;
+
 

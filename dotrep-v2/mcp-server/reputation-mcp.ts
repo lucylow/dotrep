@@ -92,7 +92,25 @@ class DotRepMCPServer {
     this.botDetector = new BotClusterDetector();
     this.pluginManager = new MCPPluginManager(this.server);
     
-    // Register core plugins
+    // Register core plugins (async initialization will be done in async init method)
+    const x402GatewayUrl = process.env.X402_GATEWAY_URL || 'http://localhost:4001';
+    this.pluginManager.registerCorePlugins(
+      this.dkgClient,
+      this.publisher,
+      this.reputationCalculator,
+      this.botDetector,
+      x402GatewayUrl
+    ).catch(err => {
+      console.error('Failed to register plugins:', err);
+    });
+
+    this.setupHandlers();
+  }
+
+  /**
+   * Initialize plugins (call this after server is ready)
+   */
+  async initializePlugins(): Promise<void> {
     const x402GatewayUrl = process.env.X402_GATEWAY_URL || 'http://localhost:4001';
     await this.pluginManager.registerCorePlugins(
       this.dkgClient,
@@ -101,15 +119,18 @@ class DotRepMCPServer {
       this.botDetector,
       x402GatewayUrl
     );
-
-    this.setupHandlers();
   }
 
   /**
    * Define available tools for AI agents
+   * Combines legacy tools with plugin-provided tools
    */
   private getTools(): Tool[] {
-    return [
+    // Get tools from plugins
+    const pluginTools = this.pluginManager.getAllTools();
+    
+    // Legacy tools
+    const legacyTools: Tool[] = [
       {
         name: 'get_developer_reputation',
         description: 'Get the reputation score and contribution history for a developer. Returns verifiable data from the OriginTrail DKG.',
@@ -848,6 +869,9 @@ class DotRepMCPServer {
         },
       },
     ];
+
+    // Combine legacy and plugin tools
+    return [...legacyTools, ...pluginTools];
   }
 
   /**
@@ -953,6 +977,18 @@ class DotRepMCPServer {
 
           case 'generate_transparency_report':
             return await this.generateTransparencyReport(args);
+
+          // Plugin-provided tools (routed through plugin manager)
+          case 'calculate_sybil_resistant_reputation':
+          case 'compare_reputations':
+          case 'detect_sybil_clusters':
+          case 'find_endorsement_opportunities':
+          case 'execute_endorsement_deal':
+            try {
+              return await this.pluginManager.handleToolCall(name, args);
+            } catch (pluginError: any) {
+              throw new Error(`Plugin tool error: ${pluginError.message}`);
+            }
 
           // x402 Autonomous Payment Tools
           case 'request_resource_with_x402':
