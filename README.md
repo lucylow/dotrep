@@ -94,204 +94,23 @@ Data Sources (CSV/JSON/APIs)
 
 ### Architecture Diagram
 
-```mermaid
-graph TB
-    subgraph "Data Sources"
-        CSV[CSV Files]
-        JSON[JSON Files]
-        API[External APIs]
-    end
-    
-    subgraph "Ingest Layer"
-        Ingest[Ingest Service<br/>JSON-LD Generator<br/>Signing]
-    end
-    
-    subgraph "DKG Layer"
-        EdgeNode[OriginTrail Edge Node<br/>DKG Publishing]
-        MockDKG[Mock DKG<br/>Local Simulator]
-        NeuroWeb[NeuroWeb<br/>Optional Merkle Anchor]
-    end
-    
-    subgraph "Reputation Engine"
-        RepEngine[Reputation Engine<br/>Weighted PageRank<br/>Sybil Detection]
-        RepAssets[ReputationAssets<br/>Signed JSON-LD]
-    end
-    
-    subgraph "MCP Server"
-        MCPServer[MCP Server<br/>REST API]
-        Tools[dkg_sparql<br/>get_reputation<br/>publish_note<br/>call_x402]
-    end
-    
-    subgraph "x402 Gateway"
-        X402[x402 Gateway<br/>HTTP 402 Flow]
-        Receipts[ReceiptAssets<br/>Verifiable Payments]
-    end
-    
-    subgraph "UI & Agents"
-        UI[React UI<br/>Leaderboard<br/>Visualization]
-        Agents[LLM Agents<br/>MCP Tool Calls]
-    end
-    
-    CSV --> Ingest
-    JSON --> Ingest
-    API --> Ingest
-    
-    Ingest --> EdgeNode
-    Ingest --> MockDKG
-    EdgeNode --> NeuroWeb
-    
-    RepEngine --> RepAssets
-    RepAssets --> EdgeNode
-    RepAssets --> MockDKG
-    
-    MCPServer --> Tools
-    Tools --> EdgeNode
-    Tools --> MockDKG
-    Tools --> X402
-    
-    X402 --> Receipts
-    Receipts --> EdgeNode
-    Receipts --> MockDKG
-    
-    UI --> MCPServer
-    UI --> X402
-    Agents --> MCPServer
-    
-    style EdgeNode fill:#e1f5ff
-    style RepEngine fill:#fff4e1
-    style MCPServer fill:#e8f5e9
-    style X402 fill:#f3e5f5
-```
+![Architecture Diagram](docs/images/architecture-diagram.jpg)
 
 ### Data Flow Diagram
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Ingest as Ingest Service
-    participant DKG as Edge Node/Mock DKG
-    participant RepEngine as Reputation Engine
-    participant MCP as MCP Server
-    participant Agent as LLM Agent
-    participant X402 as x402 Gateway
-    participant UI as React UI
-    
-    Note over User,DKG: Knowledge Asset Publishing Flow
-    User->>Ingest: Submit CSV/JSON data
-    Ingest->>Ingest: Transform to JSON-LD
-    Ingest->>Ingest: Compute contentHash
-    Ingest->>Ingest: Sign with DID
-    Ingest->>DKG: POST /publish (JSON-LD)
-    DKG-->>Ingest: Return UAL
-    Ingest-->>User: UAL + verification
-    
-    Note over RepEngine,DKG: Reputation Computation Flow
-    RepEngine->>RepEngine: Compute weighted PageRank
-    RepEngine->>RepEngine: Apply Sybil heuristics
-    RepEngine->>RepEngine: Generate ReputationAsset JSON-LD
-    RepEngine->>RepEngine: Sign asset
-    RepEngine->>DKG: POST /publish
-    DKG-->>RepEngine: Return UAL
-    
-    Note over Agent,X402: Agent Query Flow
-    Agent->>MCP: POST /tool/get_reputation(UAL)
-    MCP->>DKG: SPARQL query
-    DKG-->>MCP: ReputationAsset JSON-LD
-    MCP-->>Agent: Reputation score + UAL
-    
-    Note over User,X402: x402 Payment Flow
-    User->>X402: GET /trusted-feed/:resource
-    X402-->>User: HTTP 402 + X-Payment-Request
-    User->>X402: POST /payment/proof
-    X402->>X402: Validate payment
-    X402->>DKG: Publish ReceiptAsset
-    X402-->>User: Content + ReceiptAsset UAL
-```
+![Data Flow Diagram](docs/images/data-flow-diagram.jpg)
 
 ### Knowledge Asset Lifecycle
 
-```mermaid
-flowchart TD
-    Start[Raw Data] --> Transform[Transform to JSON-LD]
-    Transform --> Canonicalize[Canonicalize JSON-LD]
-    Canonicalize --> Hash[Compute contentHash]
-    Hash --> Sign[Sign with Publisher DID]
-    Sign --> Publish[Publish to DKG Edge Node]
-    Publish --> UAL[Receive UAL]
-    UAL --> Anchor{Anchor to<br/>NeuroWeb?}
-    Anchor -->|Yes| Merkle[Create Merkle Root]
-    Anchor -->|No| Store[Store UAL in Log]
-    Merkle --> OnChain[Submit to NeuroWeb]
-    OnChain --> Store
-    Store --> Verify[Verification Available]
-    Verify --> End[Asset Verifiable]
-    
-    style Start fill:#e1f5ff
-    style End fill:#e8f5e9
-    style Sign fill:#fff4e1
-    style UAL fill:#f3e5f5
-```
+![Knowledge Asset Lifecycle](docs/images/knowledge-asset-lifecycle.jpg)
 
 ### MCP Agent Interaction Flow
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Agent as LLM Agent
-    participant MCP as MCP Server
-    participant DKG as DKG Edge Node
-    participant X402 as x402 Gateway
-    
-    User->>Agent: "Is claim X by creator123 true?"
-    Agent->>MCP: POST /tool/get_reputation(creator123_UAL)
-    MCP->>DKG: SPARQL query for ReputationAsset
-    DKG-->>MCP: ReputationAsset JSON-LD
-    MCP-->>Agent: reputationScore: 0.87, UAL: ...
-    
-    Agent->>MCP: POST /tool/dkg_retrieve("claim X")
-    MCP->>DKG: Vector search + metadata
-    DKG-->>MCP: [{ual, snippet, provenance}]
-    MCP-->>Agent: Verified sources with UALs
-    
-    Agent->>Agent: Compose response with UAL citations
-    Agent-->>User: "Claim X is supported by UAL:urn:... (reputation: 0.87)"
-    
-    Note over Agent,X402: If premium data needed
-    Agent->>MCP: POST /tool/call_x402(resource, amount)
-    MCP->>X402: Initiate payment flow
-    X402-->>MCP: ReceiptAsset UAL
-    MCP-->>Agent: Premium data + receipt UAL
-    Agent-->>User: Response with paid access receipt
-```
+![MCP Agent Interaction Flow](docs/images/mcp-agent-interaction-flow.jpg)
 
 ### x402 Payment Flow Diagram
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant X402 as x402 Gateway
-    participant Payment as Payment Handler
-    participant DKG as DKG Edge Node
-    
-    Client->>X402: GET /trusted-feed/:resource
-    X402-->>Client: HTTP 402 Payment Required<br/>X-Payment-Request: {...}
-    
-    Client->>Payment: Execute payment (simulated)
-    Payment-->>Client: Payment proof (tx hash)
-    
-    Client->>X402: GET /trusted-feed/:resource<br/>X-Payment-Proof: {...}
-    X402->>X402: Validate payment proof
-    X402->>X402: Generate ReceiptAsset JSON-LD
-    X402->>X402: Sign ReceiptAsset
-    X402->>DKG: POST /publish (ReceiptAsset)
-    DKG-->>X402: ReceiptAsset UAL
-    X402-->>Client: HTTP 200 + Content<br/>X-Receipt-UAL: {...}
-    
-    Note over Client,DKG: Third parties can verify receipt
-    Client->>DKG: GET /assets/:receipt_ual
-    DKG-->>Client: ReceiptAsset JSON-LD
-    Client->>Client: Verify signature & hash
-```
+![x402 Payment Flow Diagram](docs/images/x402-payment-flow-diagram.jpg)
 
 ---
 
