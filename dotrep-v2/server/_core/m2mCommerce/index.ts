@@ -29,6 +29,37 @@ export {
   type M2MCommerceReputationOptions
 } from './reputationIntegration';
 
+// Autonomous Payment Decision System
+export {
+  AutonomousPaymentDecisionEngine,
+  type DecisionFactors,
+  type PaymentDecision,
+  type PremiumDataSource,
+  type QueryAnalysis,
+  type BudgetLimits,
+  type UserContext
+} from './autonomousPaymentDecisionEngine';
+
+export {
+  AutonomousBudgetManager,
+  type BudgetConfig,
+  type SpendingRecord,
+  type BudgetStatus
+} from './autonomousBudgetManager';
+
+export {
+  AutonomousPaymentOrchestrator,
+  type PaymentOrchestratorConfig,
+  type PaymentExecutionResult
+} from './autonomousPaymentOrchestrator';
+
+export {
+  AutonomousChatbot,
+  createAutonomousChatbot,
+  type ChatbotPaymentConfig,
+  type EnhancedQueryResult
+} from './autonomousChatbotIntegration';
+
 export type {
   PaymentInstructions,
   PaymentProof,

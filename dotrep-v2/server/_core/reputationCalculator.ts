@@ -11,6 +11,17 @@
  * - Continuous update and dynamic scoring
  * - PageRank-based node identification for key influencers
  * - Bot cluster detection and reputation adjustment
+ * 
+ * x402 Protocol Integration:
+ * - Tracks payments made via x402 HTTP 402 Payment Required flow
+ * - Payments are verified on-chain and represent autonomous agent commerce
+ * - x402 payments provide stronger trust signals than traditional payments
+ * - Payment evidence is stored and can be queried via DKG
+ * 
+ * Architecture Alignment:
+ * - HTTP Layer: x402 payments are HTTP-native (no special blockchain RPC required)
+ * - Stateless: Each payment verification is independent (no session required)
+ * - Web Standard: Uses standard HTTP status codes and headers
  */
 
 import { BotDetectionResults } from './botClusterDetector';
@@ -43,7 +54,14 @@ export interface OnChainIdentity {
   verifiedChains?: string[]; // Cross-chain verification
 }
 
+/**
+ * Verified Payment (Enhanced for x402 Whitepaper compliance)
+ * 
+ * Tracks x402 protocol payments with full whitepaper Section 9.2 fields
+ * for better reputation signal extraction.
+ */
 export interface VerifiedPayment {
+  // Transaction settlement fields
   txHash: string;
   chain: string;
   amount: number;
@@ -52,6 +70,18 @@ export interface VerifiedPayment {
   recipient?: string; // Payment recipient (for reputation signals)
   payerReputation?: number; // Reputation of payer (for weighted scoring)
   verified: boolean; // Verified on-chain or via facilitator
+  
+  // x402 Whitepaper Section 9.2 fields (for enhanced tracking)
+  maxAmountRequired?: string; // Maximum amount from payment request
+  assetType?: string; // Token type (e.g., "ERC20")
+  assetAddress?: string; // Smart contract address
+  paymentAddress?: string; // Recipient wallet
+  network?: string; // Blockchain network
+  payer?: string; // Payer wallet address
+  paymentId?: string; // Payment request identifier
+  nonce?: string; // Replay protection nonce
+  signature?: string; // EIP-712 signature
+  isX402Payment?: boolean; // Flag indicating x402 protocol payment
 }
 
 export interface ReputationRegistry {
@@ -431,6 +461,18 @@ export class ReputationCalculator {
    * Calculate payment-weighted reputation boost (TraceRank-style)
    * Higher-value payments from high-reputation payers = stronger signal
    * Enhanced with x402 protocol integration for autonomous agent payments
+   * 
+   * x402 Protocol Benefits:
+   * - HTTP-native payments (no special blockchain RPC for initial handshake)
+   * - Stateless verification (each payment is independently verifiable)
+   * - Cryptographically secured (on-chain verification via facilitator)
+   * - Autonomous agent commerce (represents AI-to-AI economic interactions)
+   * 
+   * These characteristics make x402 payments stronger trust signals than
+   * traditional payment methods, as they demonstrate:
+   * 1. Technical sophistication (ability to handle HTTP 402 flow)
+   * 2. Cryptographic security (on-chain verification)
+   * 3. Agent autonomy (no human intervention required)
    */
   private calculatePaymentWeightedBoost(payments: VerifiedPayment[]): number {
     if (payments.length === 0) return 0;
@@ -441,6 +483,7 @@ export class ReputationCalculator {
     let weightedSum = 0;
     let totalValue = 0;
     let x402PaymentCount = 0; // Track x402 protocol payments for additional boost
+    let x402PaymentValue = 0; // Track total value of x402 payments
 
     verifiedPayments.forEach(payment => {
       const value = payment.amount;
@@ -450,10 +493,17 @@ export class ReputationCalculator {
       // Weight = amount * payer_reputation (TraceRank principle)
       weightedSum += value * payerRep;
       
-      // x402 protocol payments get additional weight (autonomous agent payments)
-      // These are cryptographically verified and represent higher trust
-      if (payment.currency === 'USDC' || payment.chain) {
+      // Identify x402 protocol payments
+      // x402 payments are HTTP-native, stateless, and cryptographically verified
+      // Indicators: USDC currency, chain specified, or explicit x402 flag
+      const isX402Payment = payment.currency === 'USDC' && 
+                           (payment.chain || payment.verified) &&
+                           // Additional check: x402 payments typically have txHash
+                           payment.txHash;
+      
+      if (isX402Payment) {
         x402PaymentCount++;
+        x402PaymentValue += value;
       }
     });
 
@@ -464,7 +514,20 @@ export class ReputationCalculator {
     
     // Additional boost for x402 protocol payments (up to 5% extra)
     // x402 payments are cryptographically secured and represent autonomous agent commerce
-    const x402Boost = Math.min(0.05, (x402PaymentCount / verifiedPayments.length) * 0.05);
+    // The boost scales with both count and value of x402 payments
+    const x402PaymentRatio = verifiedPayments.length > 0 
+      ? x402PaymentCount / verifiedPayments.length 
+      : 0;
+    const x402ValueRatio = totalValue > 0 
+      ? x402PaymentValue / totalValue 
+      : 0;
+    
+    // Combined boost: considers both payment count and value
+    // This rewards users who receive significant x402 payments
+    const x402Boost = Math.min(
+      0.05, 
+      (x402PaymentRatio * 0.03) + (x402ValueRatio * 0.02)
+    );
     
     return baseBoost + x402Boost;
   }
@@ -1014,12 +1077,6 @@ export class ReputationCalculator {
   private readonly TIME_CONSTANTS = {
     msPerDay: 24 * 60 * 60 * 1000,
     msPerWeek: 7 * 24 * 60 * 60 * 1000,
-  };
-
-  // Add missing property to HIGHLY_TRUSTED_THRESHOLDS
-  private readonly HIGHLY_TRUSTED_THRESHOLDS_COMPLETE = {
-    ...this.HIGHLY_TRUSTED_THRESHOLDS,
-    minRequirementsPassed: 5, // Minimum number of requirements that must pass
   };
 
   /**
