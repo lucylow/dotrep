@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Activity, Database, Zap, Clock, TrendingUp, AlertCircle } from "lucide-react";
@@ -63,7 +63,7 @@ export function TelemetryDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     switch (status) {
       case 'healthy':
         return 'text-green-400 border-green-500/50 bg-green-500/10';
@@ -74,7 +74,18 @@ export function TelemetryDashboard() {
       default:
         return 'text-gray-400 border-gray-500/50 bg-gray-500/10';
     }
-  };
+  }, []);
+
+  const statusColor = useMemo(() => getStatusColor(telemetry.daHealth.status), [getStatusColor, telemetry.daHealth.status]);
+
+  // Memoize activity log to prevent unnecessary re-renders
+  const activityLog = useMemo(() => [
+    { time: '2s ago', event: 'Batch #1247 anchored on-chain', type: 'success' },
+    { time: '15s ago', event: 'Merkle proof generated for contribution #8932', type: 'info' },
+    { time: '32s ago', event: 'DA pin successful: QmX...abc', type: 'success' },
+    { time: '1m ago', event: 'New contribution verified', type: 'info' },
+    { time: '2m ago', event: 'SBT minted for contributor #456', type: 'success' },
+  ], []);
 
   return (
     <div className="space-y-6">
@@ -86,8 +97,8 @@ export function TelemetryDashboard() {
               <Activity className="h-5 w-5 text-green-400" />
               System Status
             </CardTitle>
-            <Badge variant="outline" className={getStatusColor(telemetry.daHealth.status)}>
-              <div className="mr-2 h-2 w-2 rounded-full bg-current animate-pulse" />
+            <Badge variant="outline" className={statusColor}>
+              <div className="mr-2 h-2 w-2 rounded-full bg-current animate-pulse" aria-hidden="true" />
               {telemetry.daHealth.status.toUpperCase()}
             </Badge>
           </div>
@@ -166,7 +177,7 @@ export function TelemetryDashboard() {
 
             <div className="flex items-center justify-between p-3 rounded-lg bg-gray-800/50 border border-gray-700">
               <span className="text-sm text-gray-400">Status</span>
-              <Badge variant="outline" className={getStatusColor(telemetry.daHealth.status)}>
+              <Badge variant="outline" className={statusColor}>
                 {telemetry.daHealth.status}
               </Badge>
             </div>
@@ -242,14 +253,8 @@ export function TelemetryDashboard() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {[
-              { time: '2s ago', event: 'Batch #1247 anchored on-chain', type: 'success' },
-              { time: '15s ago', event: 'Merkle proof generated for contribution #8932', type: 'info' },
-              { time: '32s ago', event: 'DA pin successful: QmX...abc', type: 'success' },
-              { time: '1m ago', event: 'New contribution verified', type: 'info' },
-              { time: '2m ago', event: 'SBT minted for contributor #456', type: 'success' },
-            ].map((log, index) => (
+          <div className="space-y-2 max-h-48 overflow-y-auto" role="log" aria-live="polite" aria-label="Live system activity">
+            {activityLog.map((log, index: number) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, x: -20 }}

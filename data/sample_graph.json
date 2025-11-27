@@ -1,0 +1,24 @@
+{
+  "nodes": [
+    {"id": "creator1", "stake": 0.5},
+    {"id": "creator2", "stake": 0.3},
+    {"id": "creator3", "stake": 0.2},
+    {"id": "creator4", "stake": 0.1},
+    {"id": "creator5", "stake": 0.0},
+    {"id": "sybil1", "stake": 0.0},
+    {"id": "sybil2", "stake": 0.0},
+    {"id": "sybil3", "stake": 0.0}
+  ],
+  "edges": [
+    {"source": "creator1", "target": "creator2", "weight": 1.0},
+    {"source": "creator2", "target": "creator3", "weight": 0.8},
+    {"source": "creator3", "target": "creator1", "weight": 0.9},
+    {"source": "creator1", "target": "creator4", "weight": 0.7},
+    {"source": "creator4", "target": "creator5", "weight": 0.6},
+    {"source": "sybil1", "target": "sybil2", "weight": 1.0},
+    {"source": "sybil2", "target": "sybil3", "weight": 1.0},
+    {"source": "sybil3", "target": "sybil1", "weight": 1.0},
+    {"source": "sybil1", "target": "creator5", "weight": 0.1}
+  ]
+}
+

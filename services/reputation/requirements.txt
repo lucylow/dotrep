@@ -1,0 +1,5 @@
+networkx>=3.2.1
+numpy>=1.26.0
+requests>=2.31.0
+python-louvain>=0.16
+

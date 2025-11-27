@@ -1,0 +1,142 @@
+{
+  "@context": {
+    "@vocab": "https://schema.org/",
+    "prov": "http://www.w3.org/ns/prov#",
+    "dkg": "https://origintrail.io/dkg-schema/",
+    "dotrep": "https://dotrep.io/ontology/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "@graph": [
+    {
+      "@id": "dotrep:ReputationAsset",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Reputation Asset",
+      "rdfs:comment": "A verifiable reputation asset with full provenance tracking",
+      "rdfs:subClassOf": ["CreativeWork", "prov:Entity"]
+    },
+    {
+      "@id": "dotrep:CommunityNote",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Community Note",
+      "rdfs:comment": "A community annotation or note about a reputation asset",
+      "rdfs:subClassOf": ["CreativeWork", "prov:Entity"]
+    },
+    {
+      "@id": "dotrep:AccessReceipt",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Access Receipt",
+      "rdfs:comment": "A receipt for x402 micropayment access to reputation data",
+      "rdfs:subClassOf": ["Invoice", "prov:Entity"]
+    },
+    {
+      "@id": "contentHash",
+      "@type": "rdf:Property",
+      "rdfs:label": "Content Hash",
+      "rdfs:comment": "SHA-256 hash of the canonicalized asset content (excluding signature and contentHash fields)",
+      "rdfs:domain": [
+        "dotrep:ReputationAsset",
+        "dotrep:CommunityNote",
+        "dotrep:AccessReceipt"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "signature",
+      "@type": "rdf:Property",
+      "rdfs:label": "Publisher Signature",
+      "rdfs:comment": "Base64-encoded Ed25519 or ECDSA signature of the canonicalized asset by the publisher DID",
+      "rdfs:domain": [
+        "dotrep:ReputationAsset",
+        "dotrep:CommunityNote",
+        "dotrep:AccessReceipt"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "creator",
+      "@type": "rdf:Property",
+      "rdfs:label": "Creator DID",
+      "rdfs:comment": "DID (Decentralized Identifier) of the asset creator/publisher",
+      "rdfs:domain": [
+        "dotrep:ReputationAsset",
+        "dotrep:CommunityNote",
+        "dotrep:AccessReceipt"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "prov:wasRevisionOf",
+      "@type": "rdf:Property",
+      "rdfs:label": "Was Revision Of",
+      "rdfs:comment": "Links to the previous version UAL of this asset",
+      "rdfs:domain": [
+        "dotrep:ReputationAsset",
+        "dotrep:CommunityNote"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:provenance",
+      "@type": "rdf:Property",
+      "rdfs:label": "Provenance Information",
+      "rdfs:comment": "Provenance metadata including computation method and source assets",
+      "rdfs:domain": "dotrep:ReputationAsset",
+      "rdfs:range": "dotrep:ProvenanceMetadata"
+    },
+    {
+      "@id": "dotrep:ProvenanceMetadata",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Provenance Metadata",
+      "rdfs:comment": "Metadata about how the asset was computed or created"
+    },
+    {
+      "@id": "dotrep:computedBy",
+      "@type": "rdf:Property",
+      "rdfs:label": "Computed By",
+      "rdfs:comment": "Agent or system that computed this asset",
+      "rdfs:domain": "dotrep:ProvenanceMetadata",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:method",
+      "@type": "rdf:Property",
+      "rdfs:label": "Computation Method",
+      "rdfs:comment": "Algorithm or method used to compute the asset",
+      "rdfs:domain": "dotrep:ProvenanceMetadata",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:sourceAssets",
+      "@type": "rdf:Property",
+      "rdfs:label": "Source Assets",
+      "rdfs:comment": "List of UALs of source assets used to compute this asset",
+      "rdfs:domain": "dotrep:ProvenanceMetadata",
+      "rdfs:range": "rdf:Bag"
+    },
+    {
+      "@id": "dotrep:targetUAL",
+      "@type": "rdf:Property",
+      "rdfs:label": "Target UAL",
+      "rdfs:comment": "UAL of the asset this note refers to",
+      "rdfs:domain": "dotrep:CommunityNote",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:resourceUAL",
+      "@type": "rdf:Property",
+      "rdfs:label": "Resource UAL",
+      "rdfs:comment": "UAL of the resource accessed via x402 payment",
+      "rdfs:domain": "dotrep:AccessReceipt",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:paymentTx",
+      "@type": "rdf:Property",
+      "rdfs:label": "Payment Transaction",
+      "rdfs:comment": "Blockchain transaction hash of the x402 payment",
+      "rdfs:domain": "dotrep:AccessReceipt",
+      "rdfs:range": "xsd:string"
+    }
+  ]
+}
+

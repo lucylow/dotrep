@@ -1,0 +1,122 @@
+version: "3.8"
+
+services:
+  # Mock DKG Edge Node (for offline demos)
+  mock-dkg:
+    build:
+      context: ../services/mock-dkg
+      dockerfile: Dockerfile
+    container_name: dotrep_mock_dkg
+    ports:
+      - "8085:8080"
+    volumes:
+      - mock_dkg_data:/app/data
+    environment:
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Ingest Service (publishes sample assets)
+  ingest:
+    build:
+      context: ../services/ingest
+      dockerfile: Dockerfile
+    container_name: dotrep_ingest
+    environment:
+      - EDGE_PUBLISH_URL=http://mock-dkg:8080
+      - EDGE_API_KEY=${EDGE_API_KEY:-}
+    depends_on:
+      mock-dkg:
+        condition: service_healthy
+    volumes:
+      - ../data:/data
+      - ../templates:/templates
+    restart: unless-stopped
+
+  # Reputation Engine
+  reputation:
+    build:
+      context: ../services/reputation
+      dockerfile: Dockerfile
+    container_name: dotrep_reputation
+    environment:
+      - EDGE_PUBLISH_URL=http://mock-dkg:8080
+      - EDGE_API_KEY=${EDGE_API_KEY:-}
+    depends_on:
+      mock-dkg:
+        condition: service_healthy
+    volumes:
+      - ../data:/data
+      - ../templates:/templates
+    command: ["python", "compute_reputation.py", "--input", "/data/sample_graph.json", "--publish", "--simulate"]
+    restart: unless-stopped
+
+  # MCP Server (AI agent tools)
+  # Note: MCP server uses existing dotrep-v2 structure
+  # For now, run separately or integrate into main app
+  # mcp-server:
+  #   build:
+  #     context: ../dotrep-v2
+  #     dockerfile: Dockerfile
+  #   container_name: dotrep_mcp_server
+  #   ports:
+  #     - "3001:3001"
+  #   environment:
+  #     - EDGE_PUBLISH_URL=http://mock-dkg:8080
+  #     - DKG_USE_MOCK=true
+  #     - DKG_FALLBACK_TO_MOCK=true
+  #     - POLKADOT_WS_ENDPOINT=${POLKADOT_WS_ENDPOINT:-ws://127.0.0.1:9944}
+  #   depends_on:
+  #     mock-dkg:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # x402 Gateway
+  x402:
+    build:
+      context: ../apps/x402
+      dockerfile: Dockerfile
+    container_name: dotrep_x402
+    ports:
+      - "4001:4000"
+    environment:
+      - EDGE_PUBLISH_URL=http://mock-dkg:8080
+      - PORT=4000
+    depends_on:
+      mock-dkg:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # UI (React app)
+  # Note: UI uses existing dotrep-v2 structure
+  # For now, run separately: cd dotrep-v2 && npm run dev
+  # ui:
+  #   build:
+  #     context: ../dotrep-v2
+  #     dockerfile: Dockerfile
+  #   container_name: dotrep_ui
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NODE_ENV=production
+  #     - VITE_API_URL=http://localhost:4000
+  #     - VITE_MCP_SERVER_URL=http://localhost:3001
+  #     - VITE_X402_GATEWAY_URL=http://localhost:4001
+  #     - VITE_EDGE_NODE_URL=http://localhost:8085
+  #   depends_on:
+  #     - x402
+  #     - mock-dkg
+  #   restart: unless-stopped
+
+volumes:
+  mock_dkg_data:
+

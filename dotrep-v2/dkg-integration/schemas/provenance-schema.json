@@ -1,0 +1,182 @@
+{
+  "@context": {
+    "@vocab": "https://schema.org/",
+    "dotrep": "https://dotrep.io/ontology/",
+    "dcterms": "http://purl.org/dc/terms/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+  },
+  "@graph": [
+    {
+      "@id": "dotrep:DatasetAsset",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Dataset Asset",
+      "rdfs:comment": "A verifiable dataset published as a Knowledge Asset with provenance information",
+      "rdfs:subClassOf": "Dataset"
+    },
+    {
+      "@id": "dotrep:ModelCheckpoint",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Model Checkpoint",
+      "rdfs:comment": "A machine learning model checkpoint with training provenance",
+      "rdfs:subClassOf": "SoftwareApplication"
+    },
+    {
+      "@id": "dotrep:TrainingRun",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Training Run",
+      "rdfs:comment": "A record of a model training run with configuration and results",
+      "rdfs:subClassOf": "Action"
+    },
+    {
+      "@id": "dotrep:merkleRoot",
+      "@type": "rdf:Property",
+      "rdfs:label": "Merkle Root",
+      "rdfs:comment": "Merkle root hash of the dataset or model for integrity verification",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:checksum",
+      "@type": "rdf:Property",
+      "rdfs:label": "Checksum",
+      "rdfs:comment": "Cryptographic checksum (SHA-256) of the dataset or model",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:datasetUAL",
+      "@type": "rdf:Property",
+      "rdfs:label": "Dataset UAL",
+      "rdfs:comment": "Uniform Asset Locator for the source dataset",
+      "rdfs:domain": "dotrep:ModelCheckpoint",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:trainingConfig",
+      "@type": "rdf:Property",
+      "rdfs:label": "Training Configuration",
+      "rdfs:comment": "JSON configuration used for training the model",
+      "rdfs:domain": "dotrep:TrainingRun",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:publisherSignature",
+      "@type": "rdf:Property",
+      "rdfs:label": "Publisher Signature",
+      "rdfs:comment": "Cryptographic signature of the publisher",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:license",
+      "@type": "rdf:Property",
+      "rdfs:label": "License",
+      "rdfs:comment": "License information for the dataset or model",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "CreativeWork"
+    },
+    {
+      "@id": "dotrep:manifestUrl",
+      "@type": "rdf:Property",
+      "rdfs:label": "Manifest URL",
+      "rdfs:comment": "URL to the dataset or model manifest file",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:anyURI"
+    },
+    {
+      "@id": "dotrep:provenanceScore",
+      "@type": "rdf:Property",
+      "rdfs:label": "Provenance Score",
+      "rdfs:comment": "Confidence score for provenance verification (0-100)",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:integer"
+    },
+    {
+      "@id": "dotrep:version",
+      "@type": "rdf:Property",
+      "rdfs:label": "Version",
+      "rdfs:comment": "Version identifier for the dataset or model",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:citations",
+      "@type": "rdf:Property",
+      "rdfs:label": "Citations",
+      "rdfs:comment": "List of UALs citing this asset or cited by this asset",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "rdf:Bag"
+    },
+    {
+      "@id": "dotrep:publishedBy",
+      "@type": "rdf:Property",
+      "rdfs:label": "Published By",
+      "rdfs:comment": "Account ID or DID of the publisher",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:publishedAt",
+      "@type": "rdf:Property",
+      "rdfs:label": "Published At",
+      "rdfs:comment": "Timestamp when the asset was published",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:dateTime"
+    },
+    {
+      "@id": "dotrep:anchoredBlock",
+      "@type": "rdf:Property",
+      "rdfs:label": "Anchored Block",
+      "rdfs:comment": "Blockchain block number where the asset was anchored",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:integer"
+    },
+    {
+      "@id": "dotrep:anchoredParachain",
+      "@type": "rdf:Property",
+      "rdfs:label": "Anchored Parachain",
+      "rdfs:comment": "Polkadot parachain ID where the asset was anchored",
+      "rdfs:domain": [
+        "dotrep:DatasetAsset",
+        "dotrep:ModelCheckpoint"
+      ],
+      "rdfs:range": "xsd:string"
+    }
+  ]
+}
+

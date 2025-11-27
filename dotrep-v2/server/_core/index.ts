@@ -10,6 +10,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startBatchAnchoring } from "../services/batchAnchorService";
+import restApiRouter from "./restApi";
+import { openApiSpec } from "./openapi";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -73,6 +75,46 @@ async function startServer() {
   registerGitHubOAuthRoutes(app);
   // GitHub webhook routes under /api/integrations/github/webhook
   registerGitHubWebhookRoutes(app);
+  
+  // REST API endpoints
+  app.use("/api", restApiRouter);
+  
+  // OpenAPI/Swagger documentation
+  app.get("/api/openapi.json", (req, res) => {
+    res.json(openApiSpec);
+  });
+  
+  app.get("/api/docs", (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>DotRep API Documentation</title>
+          <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui.css" />
+          <style>
+            body { margin: 0; }
+            .swagger-ui .topbar { display: none; }
+          </style>
+        </head>
+        <body>
+          <div id="swagger-ui"></div>
+          <script src="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui-bundle.js"></script>
+          <script>
+            SwaggerUIBundle({
+              url: '/api/openapi.json',
+              dom_id: '#swagger-ui',
+              presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIBundle.presets.standalone
+              ],
+              layout: "StandaloneLayout"
+            });
+          </script>
+        </body>
+      </html>
+    `);
+  });
+  
   // tRPC API
   app.use(
     "/api/trpc",
@@ -99,6 +141,10 @@ async function startServer() {
     console.log(`🚀 Server running on http://localhost:${port}/`);
     console.log(`Health check available at http://localhost:${port}/health`);
     console.log(`Readiness check available at http://localhost:${port}/ready`);
+    console.log(`📚 REST API documentation at http://localhost:${port}/api/docs`);
+    console.log(`📋 OpenAPI spec at http://localhost:${port}/api/openapi.json`);
+    console.log(`🔌 REST API endpoints available at http://localhost:${port}/api/v1/*`);
+    console.log(`⚡ tRPC API available at http://localhost:${port}/api/trpc/*`);
     
     // Start batch anchoring service (runs every 60 seconds)
     if (process.env.NODE_ENV === "production" || process.env.ENABLE_BATCH_ANCHORING === "true") {

@@ -1,0 +1,40 @@
+# Query: Fetch directed endorsement / follow edges (from → to) and connectionStrength
+# Purpose: Get social graph edges for PageRank computation
+# This finds foaf:knows and any Interaction/endorse edges
+
+PREFIX schema: <https://schema.org/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+
+SELECT ?from ?to ?edgeType ?connectionStrength WHERE {
+  {
+    # foaf:knows style connections (Creator-Temporal)
+    ?obs a prov:Entity, schema:Observation ;
+         schema:about ?about .
+    ?obs foaf:knows ?person .
+    ?person a foaf:Person ;
+            schema:additionalProperty ?addProp .
+    ?addProp schema:name "connectionStrength" ;
+             schema:value ?connectionStrength .
+    BIND(?about AS ?from)
+    BIND(?person AS ?to)
+    BIND("knows" AS ?edgeType)
+  }
+  UNION
+  {
+    # explicit 'endorse' Interaction triples if present
+    ?edge a schema:Interaction ;
+          schema:agent ?from ;
+          schema:target ?to ;
+          schema:interactionType ?it .
+    FILTER(CONTAINS(LCASE(STR(?it)), "endorse") || CONTAINS(LCASE(STR(?it)), "recommend"))
+    OPTIONAL {
+      ?edge schema:additionalProperty ?ap .
+      ?ap schema:name "strength" ;
+          schema:value ?connectionStrength .
+    }
+    BIND("endorse" AS ?edgeType)
+  }
+}
+LIMIT 20000
+

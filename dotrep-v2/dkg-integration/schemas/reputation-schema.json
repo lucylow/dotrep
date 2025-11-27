@@ -1,0 +1,105 @@
+{
+  "@context": {
+    "@vocab": "https://schema.org/",
+    "dotrep": "https://dotrep.io/ontology/",
+    "polkadot": "https://polkadot.network/ontology/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#"
+  },
+  "@graph": [
+    {
+      "@id": "dotrep:DeveloperReputation",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Developer Reputation",
+      "rdfs:comment": "Represents the reputation score and contribution history of a developer in the DotRep system",
+      "rdfs:subClassOf": "Person"
+    },
+    {
+      "@id": "dotrep:reputationScore",
+      "@type": "rdf:Property",
+      "rdfs:label": "Reputation Score",
+      "rdfs:comment": "The numerical reputation score of a developer (0-1000)",
+      "rdfs:domain": "dotrep:DeveloperReputation",
+      "rdfs:range": "xsd:integer"
+    },
+    {
+      "@id": "dotrep:contributions",
+      "@type": "rdf:Property",
+      "rdfs:label": "Contributions",
+      "rdfs:comment": "List of verified contributions made by the developer",
+      "rdfs:domain": "dotrep:DeveloperReputation",
+      "rdfs:range": "dotrep:Contribution"
+    },
+    {
+      "@id": "dotrep:Contribution",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Contribution",
+      "rdfs:comment": "A verified contribution to an open-source project",
+      "rdfs:subClassOf": "CreativeWork"
+    },
+    {
+      "@id": "dotrep:contributionType",
+      "@type": "rdf:Property",
+      "rdfs:label": "Contribution Type",
+      "rdfs:comment": "The type of contribution (e.g., github_pr, github_commit, gitlab_mr)",
+      "rdfs:domain": "dotrep:Contribution",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:impactScore",
+      "@type": "rdf:Property",
+      "rdfs:label": "Impact Score",
+      "rdfs:comment": "The impact score of a contribution on the project",
+      "rdfs:domain": "dotrep:Contribution",
+      "rdfs:range": "xsd:float"
+    },
+    {
+      "@id": "dotrep:verifiedAt",
+      "@type": "rdf:Property",
+      "rdfs:label": "Verified At",
+      "rdfs:comment": "Timestamp when the contribution was verified",
+      "rdfs:domain": "dotrep:Contribution",
+      "rdfs:range": "xsd:dateTime"
+    },
+    {
+      "@id": "dotrep:blockchainProof",
+      "@type": "rdf:Property",
+      "rdfs:label": "Blockchain Proof",
+      "rdfs:comment": "Cryptographic proof of the contribution stored on Polkadot",
+      "rdfs:domain": "dotrep:Contribution",
+      "rdfs:range": "dotrep:BlockchainProof"
+    },
+    {
+      "@id": "dotrep:BlockchainProof",
+      "@type": "rdfs:Class",
+      "rdfs:label": "Blockchain Proof",
+      "rdfs:comment": "Cryptographic proof of data integrity stored on blockchain",
+      "rdfs:subClassOf": "DigitalDocument"
+    },
+    {
+      "@id": "dotrep:transactionHash",
+      "@type": "rdf:Property",
+      "rdfs:label": "Transaction Hash",
+      "rdfs:comment": "The blockchain transaction hash containing the proof",
+      "rdfs:domain": "dotrep:BlockchainProof",
+      "rdfs:range": "xsd:string"
+    },
+    {
+      "@id": "dotrep:blockNumber",
+      "@type": "rdf:Property",
+      "rdfs:label": "Block Number",
+      "rdfs:comment": "The block number where the proof was recorded",
+      "rdfs:domain": "dotrep:BlockchainProof",
+      "rdfs:range": "xsd:integer"
+    },
+    {
+      "@id": "dotrep:parachainId",
+      "@type": "rdf:Property",
+      "rdfs:label": "Parachain ID",
+      "rdfs:comment": "The Polkadot parachain ID where the proof is stored",
+      "rdfs:domain": "dotrep:BlockchainProof",
+      "rdfs:range": "xsd:string"
+    }
+  ]
+}

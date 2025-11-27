@@ -1,0 +1,25 @@
+{
+  "@context": [
+    "https://schema.org/",
+    "https://trust-marketplace.org/schema/v1",
+    {
+      "dotrep": "https://dotrep.io/ontology/",
+      "guardian": "https://guardian.umanitek.ai/schema/"
+    }
+  ],
+  "@type": "dotrep:TrustedUserProfile",
+  "@id": "ual:dkg:profile:{{creatorId}}",
+  "dotrep:creator": "{{creatorId}}",
+  "schema:name": "{{creatorName}}",
+  "dotrep:reputationMetrics": {
+    "@type": "dotrep:ReputationMetrics",
+    "dotrep:overallScore": {{overallScore}},
+    "dotrep:safetyScore": {{safetyScore}},
+    "dotrep:engagementQuality": {{engagementQuality}},
+    "dotrep:totalVerifications": {{totalVerifications}}
+  },
+  "dotrep:verificationHistory": {{verificationHistory}},
+  "schema:dateCreated": "{{dateCreated}}",
+  "schema:dateModified": "{{dateModified}}"
+}
+

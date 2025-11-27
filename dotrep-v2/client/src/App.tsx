@@ -1,31 +1,35 @@
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { EnhancedThemeProvider } from "./contexts/EnhancedThemeContext";
-import LandingPageLovable from "./pages/LandingPageLovable";
-import DocsPage from "./pages/DocsPage";
-import ReputationPage from "./pages/ReputationPage";
-import DashboardImproved from "./pages/DashboardImproved";
-import EnhancedDashboard from "./pages/EnhancedDashboard";
-import ConnectPage from "./pages/ConnectPage";
-import ProofExplorerPage from "./pages/ProofExplorerPage";
-import SbtMintPage from "./pages/SbtMintPage";
-import TelemetryPage from "./pages/TelemetryPage";
-import GovernancePage from "./pages/GovernancePage";
-import XcmGatewayPage from "./pages/XcmGatewayPage";
-import IdentityPage from "./pages/IdentityPage";
-import NftGalleryPage from "./pages/NftGalleryPage";
-import AnalyticsPage from "./pages/AnalyticsPage";
-import LeaderboardPage from "./pages/LeaderboardPage";
-import ContributorProfilePage from "./pages/ContributorProfilePage";
-import AnchorExplorerPage from "./pages/AnchorExplorerPage";
-import ChainInfoPage from "./pages/ChainInfoPage";
-import MultiChainReputationPage from "./pages/MultiChainReputationPage";
-import ContextAwareReputationPage from "./pages/ContextAwareReputationPage";
-import CloudVerificationPage from "./pages/CloudVerificationPage";
+import { PageLoader } from "./components/ui/PageLoader";
+
+// Lazy load all pages for code splitting
+const LandingPageLovable = lazy(() => import("./pages/LandingPageLovable"));
+const DocsPage = lazy(() => import("./pages/DocsPage"));
+const ReputationPage = lazy(() => import("./pages/ReputationPage"));
+const DashboardImproved = lazy(() => import("./pages/DashboardImproved"));
+const EnhancedDashboard = lazy(() => import("./pages/EnhancedDashboard"));
+const ConnectPage = lazy(() => import("./pages/ConnectPage"));
+const ProofExplorerPage = lazy(() => import("./pages/ProofExplorerPage"));
+const SbtMintPage = lazy(() => import("./pages/SbtMintPage"));
+const TelemetryPage = lazy(() => import("./pages/TelemetryPage"));
+const GovernancePage = lazy(() => import("./pages/GovernancePage"));
+const XcmGatewayPage = lazy(() => import("./pages/XcmGatewayPage"));
+const IdentityPage = lazy(() => import("./pages/IdentityPage"));
+const NftGalleryPage = lazy(() => import("./pages/NftGalleryPage"));
+const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
+const LeaderboardPage = lazy(() => import("./pages/LeaderboardPage"));
+const ContributorProfilePage = lazy(() => import("./pages/ContributorProfilePage"));
+const AnchorExplorerPage = lazy(() => import("./pages/AnchorExplorerPage"));
+const ChainInfoPage = lazy(() => import("./pages/ChainInfoPage"));
+const MultiChainReputationPage = lazy(() => import("./pages/MultiChainReputationPage"));
+const ContextAwareReputationPage = lazy(() => import("./pages/ContextAwareReputationPage"));
+const CloudVerificationPage = lazy(() => import("./pages/CloudVerificationPage"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 function Router() {
   // Complete page structure with Polkadot SDK integration:
@@ -49,30 +53,122 @@ function Router() {
   // 18. Multi-Chain Reputation (/multi-chain) - Cross-chain reputation
   return (
     <Switch>
-      <Route path={"/"} component={LandingPageLovable} />
-      <Route path="/docs" component={DocsPage} />
-      <Route path="/reputation" component={ReputationPage} />
-      <Route path="/dashboard" component={EnhancedDashboard} />
-      <Route path="/dashboard-old" component={DashboardImproved} />
-      <Route path="/connect" component={ConnectPage} />
-      <Route path="/proof-explorer" component={ProofExplorerPage} />
-      <Route path="/sbt-mint" component={SbtMintPage} />
-      <Route path="/telemetry" component={TelemetryPage} />
-      <Route path="/governance" component={GovernancePage} />
-      <Route path="/xcm-gateway" component={XcmGatewayPage} />
-      <Route path="/identity" component={IdentityPage} />
-      <Route path="/nft-gallery" component={NftGalleryPage} />
-      <Route path="/analytics" component={AnalyticsPage} />
-      <Route path="/leaderboard" component={LeaderboardPage} />
-      <Route path="/contributor/:username" component={ContributorProfilePage} />
-      <Route path="/anchors" component={AnchorExplorerPage} />
-      <Route path="/chain-info" component={ChainInfoPage} />
-      <Route path="/multi-chain" component={MultiChainReputationPage} />
-      <Route path="/context-aware" component={ContextAwareReputationPage} />
-      <Route path="/cloud-verification" component={CloudVerificationPage} />
-      <Route path={"/404"} component={NotFound} />
+      <Route path={"/"}>
+        <Suspense fallback={<PageLoader />}>
+          <LandingPageLovable />
+        </Suspense>
+      </Route>
+      <Route path="/docs">
+        <Suspense fallback={<PageLoader />}>
+          <DocsPage />
+        </Suspense>
+      </Route>
+      <Route path="/reputation">
+        <Suspense fallback={<PageLoader />}>
+          <ReputationPage />
+        </Suspense>
+      </Route>
+      <Route path="/dashboard">
+        <Suspense fallback={<PageLoader />}>
+          <EnhancedDashboard />
+        </Suspense>
+      </Route>
+      <Route path="/dashboard-old">
+        <Suspense fallback={<PageLoader />}>
+          <DashboardImproved />
+        </Suspense>
+      </Route>
+      <Route path="/connect">
+        <Suspense fallback={<PageLoader />}>
+          <ConnectPage />
+        </Suspense>
+      </Route>
+      <Route path="/proof-explorer">
+        <Suspense fallback={<PageLoader />}>
+          <ProofExplorerPage />
+        </Suspense>
+      </Route>
+      <Route path="/sbt-mint">
+        <Suspense fallback={<PageLoader />}>
+          <SbtMintPage />
+        </Suspense>
+      </Route>
+      <Route path="/telemetry">
+        <Suspense fallback={<PageLoader />}>
+          <TelemetryPage />
+        </Suspense>
+      </Route>
+      <Route path="/governance">
+        <Suspense fallback={<PageLoader />}>
+          <GovernancePage />
+        </Suspense>
+      </Route>
+      <Route path="/xcm-gateway">
+        <Suspense fallback={<PageLoader />}>
+          <XcmGatewayPage />
+        </Suspense>
+      </Route>
+      <Route path="/identity">
+        <Suspense fallback={<PageLoader />}>
+          <IdentityPage />
+        </Suspense>
+      </Route>
+      <Route path="/nft-gallery">
+        <Suspense fallback={<PageLoader />}>
+          <NftGalleryPage />
+        </Suspense>
+      </Route>
+      <Route path="/analytics">
+        <Suspense fallback={<PageLoader />}>
+          <AnalyticsPage />
+        </Suspense>
+      </Route>
+      <Route path="/leaderboard">
+        <Suspense fallback={<PageLoader />}>
+          <LeaderboardPage />
+        </Suspense>
+      </Route>
+      <Route path="/contributor/:username">
+        <Suspense fallback={<PageLoader />}>
+          <ContributorProfilePage />
+        </Suspense>
+      </Route>
+      <Route path="/anchors">
+        <Suspense fallback={<PageLoader />}>
+          <AnchorExplorerPage />
+        </Suspense>
+      </Route>
+      <Route path="/chain-info">
+        <Suspense fallback={<PageLoader />}>
+          <ChainInfoPage />
+        </Suspense>
+      </Route>
+      <Route path="/multi-chain">
+        <Suspense fallback={<PageLoader />}>
+          <MultiChainReputationPage />
+        </Suspense>
+      </Route>
+      <Route path="/context-aware">
+        <Suspense fallback={<PageLoader />}>
+          <ContextAwareReputationPage />
+        </Suspense>
+      </Route>
+      <Route path="/cloud-verification">
+        <Suspense fallback={<PageLoader />}>
+          <CloudVerificationPage />
+        </Suspense>
+      </Route>
+      <Route path={"/404"}>
+        <Suspense fallback={<PageLoader />}>
+          <NotFound />
+        </Suspense>
+      </Route>
       {/* Final fallback route */}
-      <Route component={NotFound} />
+      <Route>
+        <Suspense fallback={<PageLoader />}>
+          <NotFound />
+        </Suspense>
+      </Route>
     </Switch>
   );
 }

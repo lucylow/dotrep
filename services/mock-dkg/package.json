@@ -1,0 +1,13 @@
+{
+  "name": "mock-dkg",
+  "version": "1.0.0",
+  "description": "Mock DKG Edge Node for offline demos",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
+

@@ -1,0 +1,30 @@
+{
+  "name": "x402-gateway",
+  "version": "1.1.0",
+  "description": "x402 Micropayment Gateway for DOTREP - Enhanced Web Payments Layer",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "example": "node example-usage.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "x402",
+    "micropayments",
+    "web-payments",
+    "http-402",
+    "blockchain",
+    "usdc",
+    "base",
+    "solana"
+  ],
+  "dependencies": {
+    "express": "^4.21.2",
+    "axios": "^1.12.0",
+    "ethers": "^6.13.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
+

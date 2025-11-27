@@ -3,6 +3,8 @@
  * Tracks events and generates analytics reports
  */
 
+import { getMockReputationReport } from "./mockData";
+
 export interface ReputationEvent {
   type: 'reputation_update' | 'contribution_verified' | 'governance_proposal' | 'nft_minted';
   userId: string;
@@ -80,28 +82,11 @@ export class CloudMonitoringService {
         };
       }
     } catch (error) {
-      console.error('Failed to generate reputation report:', error);
+      console.warn('Failed to generate reputation report, using mock data:', error);
     }
 
     // Return mock report if cloud service unavailable
-    return {
-      summary: {
-        overallScore: 0,
-        percentile: 0,
-        rank: 0,
-        contributionCount: 0
-      },
-      trends: {
-        scoreHistory: [],
-        contributionHistory: []
-      },
-      recommendations: [],
-      visualization: {
-        timeline: null,
-        breakdown: null,
-        comparisons: null
-      }
-    };
+    return getMockReputationReport(userId);
   }
 
   private generateCloudCharts(report: any) {

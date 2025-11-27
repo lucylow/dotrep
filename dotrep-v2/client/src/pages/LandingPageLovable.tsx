@@ -62,7 +62,7 @@ export default function LandingPageLovable() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.1 }}
-            className="text-5xl md:text-7xl font-extrabold mb-6 leading-tight text-[#131313] text-balance"
+            className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold mb-6 leading-tight text-[#131313] text-balance px-2"
           >
             Decentralized Reputation.
             <br />
@@ -76,7 +76,7 @@ export default function LandingPageLovable() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-xl text-[#4F4F4F] max-w-3xl mx-auto mb-8 leading-relaxed"
+            className="text-base sm:text-lg md:text-xl text-[#4F4F4F] max-w-3xl mx-auto mb-8 leading-relaxed px-4"
           >
             DotRep anchors developer contributions into Polkadot Cloud DA, verifies them off-chain,
             and finalizes trust on-chain through a custom Substrate pallet.
@@ -89,14 +89,27 @@ export default function LandingPageLovable() {
             transition={{ duration: 0.6, delay: 0.3 }}
             className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-4 max-w-2xl mx-auto mb-8 flex items-center justify-between shadow-lg card-hover"
           >
-            <code className="text-[#6C3CF0] dark:text-[#A074FF] font-mono text-sm md:text-base">npx create-dotrep-app my-app</code>
+            <code className="text-[#6C3CF0] dark:text-[#A074FF] font-mono text-xs sm:text-sm md:text-base break-all sm:break-normal">
+              npx create-dotrep-app my-app
+            </code>
             <Button
               size="sm"
               variant="ghost"
               onClick={copyCommand}
-              className="text-[#4F4F4F] dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-smooth"
+              className="text-[#4F4F4F] dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-smooth flex-shrink-0 ml-2"
+              aria-label={copied ? "Copied to clipboard" : "Copy command to clipboard"}
             >
-              {copied ? <Check className="w-4 h-4 text-[#3DD68C]" /> : <Copy className="w-4 h-4" />}
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-[#3DD68C]" aria-hidden="true" />
+                  <span className="sr-only">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" aria-hidden="true" />
+                  <span className="sr-only">Copy</span>
+                </>
+              )}
             </Button>
           </motion.div>
 
@@ -105,19 +118,32 @@ export default function LandingPageLovable() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.4 }}
-            className="flex flex-wrap items-center justify-center gap-4 mb-12"
+            className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-4 mb-12"
           >
-            <Button className="btn-primary px-8 py-6 text-lg">
-              <Wallet className="w-5 h-5 mr-2" />
-              Connect Polkadot Wallet
+            <Button 
+              className="btn-primary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
+              aria-label="Connect your Polkadot wallet"
+            >
+              <Wallet className="w-5 h-5 mr-2" aria-hidden="true" />
+              <span className="hidden sm:inline">Connect Polkadot Wallet</span>
+              <span className="sm:hidden">Connect Wallet</span>
             </Button>
             <Link href="/dashboard">
-              <Button variant="outline" className="btn-secondary px-8 py-6 text-lg">
-                View Dashboard <ArrowRight className="w-5 h-5 ml-2" />
+              <Button 
+                variant="outline" 
+                className="btn-secondary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
+                aria-label="View your dashboard"
+              >
+                <span>View Dashboard</span>
+                <ArrowRight className="w-5 h-5 ml-2" aria-hidden="true" />
               </Button>
             </Link>
             <Link href="/docs">
-              <Button variant="outline" className="btn-secondary px-8 py-6 text-lg">
+              <Button 
+                variant="outline" 
+                className="btn-secondary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
+                aria-label="View documentation"
+              >
                 View Docs
               </Button>
             </Link>

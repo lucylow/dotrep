@@ -1,0 +1,34 @@
+# Query: Fetch Creator temporal observations (followers, expertise, rank, stake hint if present)
+# Purpose: Get time-series data for creators (useful for temporal Sybil detection)
+
+PREFIX schema: <https://schema.org/>
+PREFIX prov: <http://www.w3.org/ns/prov#>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+
+SELECT ?entity ?generatedAtTime ?observationDate ?about ?rank ?interactionCount ?followerCount ?connectionStrength ?expertiseName WHERE {
+  ?entity a prov:Entity, schema:Observation ;
+          prov:generatedAtTime ?generatedAtTime ;
+          schema:observationDate ?observationDate ;
+          schema:about ?about .
+  OPTIONAL { ?entity schema:rank ?rank . }
+  OPTIONAL {
+    ?entity schema:interactionStatistic ?stat .
+    ?stat schema:userInteractionCount ?interactionCount .
+  }
+  OPTIONAL {
+    ?entity schema:interactionStatistic ?fstats .
+    ?fstats schema:interactionType [ a schema:FollowAction ] ;
+            schema:userInteractionCount ?followerCount .
+  }
+  OPTIONAL {
+    ?entity foaf:knows ?person .
+    ?person schema:additionalProperty ?ap .
+    ?ap schema:name "connectionStrength" ; schema:value ?connectionStrength .
+  }
+  OPTIONAL {
+    ?entity schema:expertise ?exp .
+    ?exp schema:name ?expertiseName .
+  }
+}
+LIMIT 2000
+
