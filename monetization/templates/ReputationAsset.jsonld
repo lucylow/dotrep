@@ -1,0 +1,24 @@
+{
+  "@context": ["https://schema.org/"],
+  "@type": "ReputationAsset",
+  "id": "urn:ual:dotrep:reputation:{{creatorId}}",
+  "creatorId": "{{creatorId}}",
+  "graphScore": {{graphScore}},
+  "stakeWeight": {{stakeWeight}},
+  "paymentWeight": {{paymentWeight}},
+  "sybilPenalty": {{sybilPenalty}},
+  "finalScore": {{finalScore}},
+  "computedAt": "{{computedAt}}",
+  "contentHash": "{{contentHash}}",
+  "signature": "{{signature}}",
+  "provenance": {
+    "algorithm": "weighted-pagerank",
+    "version": "1.0",
+    "parameters": {
+      "paymentWeight": 0.3,
+      "stakeWeight": 0.2,
+      "graphWeight": 0.5
+    }
+  }
+}
+

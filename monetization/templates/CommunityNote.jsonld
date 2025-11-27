@@ -1,0 +1,16 @@
+{
+  "@context": ["https://schema.org/"],
+  "@type": "CommunityNote",
+  "id": "urn:ual:dotrep:note:{{noteId}}",
+  "author": "{{author}}",
+  "content": "{{content}}",
+  "topic": "{{topic}}",
+  "createdAt": "{{createdAt}}",
+  "contentHash": "{{contentHash}}",
+  "signature": "{{signature}}",
+  "provenance": {
+    "publishedVia": "dotrep-sdk",
+    "version": "1.0"
+  }
+}
+

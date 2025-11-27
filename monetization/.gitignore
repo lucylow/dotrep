@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Hardhat
+cache/
+artifacts/
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
