@@ -178,110 +178,169 @@ export class ReputationCalculator {
    * - Guardian dataset integration for Sybil resistance
    * - Three-layer architecture support (Agent-Knowledge-Trust)
    * 
-   * @throws {Error} If input validation fails
+   * @throws {Error} If input validation fails or calculation encounters critical errors
    */
   async calculateReputation(request: ReputationCalculationRequest): Promise<ReputationScore> {
-    // Input validation
-    this.validateRequest(request);
+    try {
+      // Input validation
+      this.validateRequest(request);
 
-    const { 
-      contributions, 
-      algorithmWeights, 
-      timeDecayFactor, 
-      userId, 
-      includeSafetyScore = false,
-      onChainIdentity,
-      verifiedPayments = [],
-      reputationRegistry,
-      includeHighlyTrustedDetermination = false,
-      publishToDKG = false, // New option to auto-publish to DKG
-      dkgClient // Optional DKG client for publishing
-    } = request;
+      const { 
+        contributions, 
+        algorithmWeights, 
+        timeDecayFactor, 
+        userId, 
+        includeSafetyScore = false,
+        onChainIdentity,
+        verifiedPayments = [],
+        reputationRegistry,
+        includeHighlyTrustedDetermination = false,
+        publishToDKG = false, // New option to auto-publish to DKG
+        dkgClient // Optional DKG client for publishing
+      } = request;
 
-    const now = Date.now();
+      const now = Date.now();
 
-    // Calculate base reputation from contributions
-    const { breakdown, overall: baseOverall } = this.calculateContributionScores(
-      contributions,
-      algorithmWeights,
-      timeDecayFactor,
-      now
-    );
-
-    // Apply boosts and penalties
-    let overall = baseOverall;
-    overall = this.applyPaymentBoost(overall, verifiedPayments);
-    overall = this.applyRegistryBoost(overall, reputationRegistry);
-
-    // Apply bot detection penalty if provided
-    const { penalty: botDetectionPenalty, sybilRisk } = request.botDetectionResults
-      ? this.calculateBotDetectionPenalty(userId, request.botDetectionResults)
-      : { penalty: 0, sybilRisk: 0 };
-
-    if (botDetectionPenalty > 0) {
-      overall = overall * (1 - botDetectionPenalty);
-    }
-
-    // Calculate percentile and rank in parallel
-    const [percentile, rank] = await Promise.all([
-      this.calculatePercentile(userId, overall),
-      this.calculateRank(userId),
-    ]);
-
-    // Get Guardian safety score if requested (Umanitek Guardian dataset integration)
-    const { safetyScore, combinedScore } = includeSafetyScore
-      ? await this.calculateSafetyScore(userId, overall)
-      : { safetyScore: undefined, combinedScore: undefined };
-
-    // Determine highly trusted user status (x402 protocol)
-    const highlyTrustedStatus = includeHighlyTrustedDetermination
-      ? await this.determineHighlyTrustedUser({
-          userId,
-          overall,
-          onChainIdentity,
-          verifiedPayments,
-          reputationRegistry,
-          contributions,
-        })
-      : undefined;
-
-    const reputationScore: ReputationScore = {
-      overall: Math.round(Math.max(0, overall)), // Ensure non-negative
-      breakdown: this.normalizeBreakdown(breakdown),
-      percentile: Math.max(0, Math.min(100, percentile)), // Clamp to 0-100
-      rank: Math.max(0, rank), // Ensure non-negative
-      lastUpdated: now,
-      safetyScore,
-      combinedScore: combinedScore ? Math.round(Math.max(0, combinedScore)) : undefined,
-      highlyTrustedStatus,
-      botDetectionPenalty: botDetectionPenalty > 0 ? botDetectionPenalty : undefined,
-      sybilRisk: sybilRisk > 0 ? sybilRisk : undefined,
-    };
-
-    // Auto-publish to DKG as Knowledge Asset (Knowledge Layer integration)
-    if (publishToDKG && dkgClient) {
+      // Calculate base reputation from contributions
+      let breakdown: Record<string, number>;
+      let baseOverall: number;
       try {
-        await this.publishReputationToDKG(
-          dkgClient,
-          userId,
-          reputationScore,
+        const result = this.calculateContributionScores(
           contributions,
-          {
-            safetyScore,
-            sybilRisk,
-            botDetectionPenalty,
-            highlyTrusted: highlyTrustedStatus?.isHighlyTrusted,
-            verifiedPayments: verifiedPayments.length,
-            onChainIdentity: onChainIdentity ? true : false
-          }
+          algorithmWeights,
+          timeDecayFactor,
+          now
         );
+        breakdown = result.breakdown;
+        baseOverall = result.overall;
       } catch (error) {
-        console.warn(`Failed to publish reputation to DKG for ${userId}:`, error);
-        // Don't fail the calculation if DKG publish fails
+        throw new Error(`Failed to calculate contribution scores for user ${userId}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    }
 
-    return reputationScore;
+      // Apply boosts and penalties
+      let overall = baseOverall;
+      try {
+        overall = this.applyPaymentBoost(overall, verifiedPayments);
+        overall = this.applyRegistryBoost(overall, reputationRegistry);
+      } catch (error) {
+        console.warn(`Failed to apply boosts for user ${userId}, using base score:`, error);
+        // Continue with base score if boost calculation fails
+      }
+
+      // Apply bot detection penalty if provided
+      let botDetectionPenalty = 0;
+      let sybilRisk = 0;
+      if (request.botDetectionResults) {
+        try {
+          const result = this.calculateBotDetectionPenalty(userId, request.botDetectionResults);
+          botDetectionPenalty = result.penalty;
+          sybilRisk = result.sybilRisk;
+        } catch (error) {
+          console.warn(`Failed to calculate bot detection penalty for user ${userId}:`, error);
+          // Continue without penalty if calculation fails
+        }
+      }
+
+      if (botDetectionPenalty > 0) {
+        overall = overall * (1 - botDetectionPenalty);
+      }
+
+      // Calculate percentile and rank in parallel with error handling
+      let percentile = 0;
+      let rank = 0;
+      try {
+        [percentile, rank] = await Promise.all([
+          this.calculatePercentile(userId, overall).catch(err => {
+            console.warn(`Failed to calculate percentile for user ${userId}:`, err);
+            return Math.min(100, Math.max(0, (overall / 1000) * 100)); // Fallback calculation
+          }),
+          this.calculateRank(userId).catch(err => {
+            console.warn(`Failed to calculate rank for user ${userId}:`, err);
+            return 0; // Fallback rank
+          }),
+        ]);
+      } catch (error) {
+        console.warn(`Failed to calculate percentile/rank for user ${userId}:`, error);
+        // Use fallback values
+        percentile = Math.min(100, Math.max(0, (overall / 1000) * 100));
+        rank = 0;
+      }
+
+      // Get Guardian safety score if requested (Umanitek Guardian dataset integration)
+      let safetyScore: number | undefined;
+      let combinedScore: number | undefined;
+      if (includeSafetyScore) {
+        try {
+          const result = await this.calculateSafetyScore(userId, overall);
+          safetyScore = result.safetyScore;
+          combinedScore = result.combinedScore;
+        } catch (error) {
+          console.warn(`Failed to calculate safety score for user ${userId}:`, error);
+          // Continue without safety score if calculation fails
+        }
+      }
+
+      // Determine highly trusted user status (x402 protocol)
+      let highlyTrustedStatus: HighlyTrustedUserStatus | undefined;
+      if (includeHighlyTrustedDetermination) {
+        try {
+          highlyTrustedStatus = await this.determineHighlyTrustedUser({
+            userId,
+            overall,
+            onChainIdentity,
+            verifiedPayments,
+            reputationRegistry,
+            contributions,
+          });
+        } catch (error) {
+          console.warn(`Failed to determine highly trusted status for user ${userId}:`, error);
+          // Continue without highly trusted status if calculation fails
+        }
+      }
+
+      const reputationScore: ReputationScore = {
+        overall: Math.round(Math.max(0, overall)), // Ensure non-negative
+        breakdown: this.normalizeBreakdown(breakdown),
+        percentile: Math.max(0, Math.min(100, percentile)), // Clamp to 0-100
+        rank: Math.max(0, rank), // Ensure non-negative
+        lastUpdated: now,
+        safetyScore,
+        combinedScore: combinedScore ? Math.round(Math.max(0, combinedScore)) : undefined,
+        highlyTrustedStatus,
+        botDetectionPenalty: botDetectionPenalty > 0 ? botDetectionPenalty : undefined,
+        sybilRisk: sybilRisk > 0 ? sybilRisk : undefined,
+      };
+
+      // Auto-publish to DKG as Knowledge Asset (Knowledge Layer integration)
+      if (publishToDKG && dkgClient) {
+        try {
+          await this.publishReputationToDKG(
+            dkgClient,
+            userId,
+            reputationScore,
+            contributions,
+            {
+              safetyScore,
+              sybilRisk,
+              botDetectionPenalty,
+              highlyTrusted: highlyTrustedStatus?.isHighlyTrusted,
+              verifiedPayments: verifiedPayments.length,
+              onChainIdentity: onChainIdentity ? true : false
+            }
+          );
+        } catch (error) {
+          console.warn(`Failed to publish reputation to DKG for ${userId}:`, error);
+          // Don't fail the calculation if DKG publish fails
+        }
+      }
+
+      return reputationScore;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Failed to calculate')) {
+        throw error; // Re-throw validation and calculation errors
+      }
+      throw new Error(`Reputation calculation failed for user ${request.userId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -317,6 +376,8 @@ export class ReputationCalculator {
 
   /**
    * Calculate contribution scores with time decay and verification boosts
+   * 
+   * @throws {Error} If invalid input data is provided
    */
   private calculateContributionScores(
     contributions: Contribution[],
@@ -324,51 +385,165 @@ export class ReputationCalculator {
     timeDecayFactor: number,
     now: number
   ): { breakdown: Record<string, number>; overall: number } {
-    const msPerDay = this.TIME_CONSTANTS.msPerDay;
-    const breakdown: Record<string, number> = {};
+    try {
+      if (!Array.isArray(contributions)) {
+        throw new Error('Contributions must be an array');
+      }
+      if (typeof now !== 'number' || now <= 0) {
+        throw new Error('Invalid timestamp: now must be a positive number');
+      }
+      if (typeof timeDecayFactor !== 'number' || timeDecayFactor < 0) {
+        throw new Error('Invalid timeDecayFactor: must be a non-negative number');
+      }
 
-    contributions.forEach(contribution => {
-      const ageInDays = (now - contribution.timestamp) / msPerDay;
-      const decayFactor = Math.exp(-timeDecayFactor * ageInDays);
-      const weight = algorithmWeights[contribution.type] || 1;
-      
-      // Boost verified contributions (x402 protocol: transaction-verified signals)
-      const verificationBoost = contribution.verified 
-        ? this.SCORING_WEIGHTS.verificationBoost 
-        : 1.0;
-      
-      // Verifier boost (up to 25% for 5+ verifiers)
-      const verifierBoost = contribution.verifierCount 
-        ? 1 + (Math.min(contribution.verifierCount, this.SCORING_WEIGHTS.maxVerifiers) * 
-               this.SCORING_WEIGHTS.verifierBoostPerVerifier)
-        : 1.0;
-      
-      const score = contribution.weight * weight * decayFactor * verificationBoost * verifierBoost;
-      breakdown[contribution.type] = (breakdown[contribution.type] || 0) + score;
-    });
+      const msPerDay = this.TIME_CONSTANTS.msPerDay;
+      if (msPerDay <= 0) {
+        throw new Error('Invalid TIME_CONSTANTS.msPerDay: must be positive');
+      }
 
-    const overall = Object.values(breakdown).reduce((sum, score) => sum + score, 0);
-    return { breakdown, overall };
+      const breakdown: Record<string, number> = {};
+
+      contributions.forEach((contribution, index) => {
+        try {
+          if (!contribution || typeof contribution !== 'object') {
+            throw new Error(`Invalid contribution at index ${index}: must be an object`);
+          }
+          if (typeof contribution.weight !== 'number' || contribution.weight < 0) {
+            throw new Error(`Invalid contribution[${index}].weight: must be a non-negative number`);
+          }
+          if (typeof contribution.timestamp !== 'number' || contribution.timestamp < 0) {
+            throw new Error(`Invalid contribution[${index}].timestamp: must be a valid timestamp`);
+          }
+
+          const ageInDays = (now - contribution.timestamp) / msPerDay;
+          if (!isFinite(ageInDays) || ageInDays < 0) {
+            console.warn(`Invalid age calculation for contribution ${index}, using 0:`, ageInDays);
+            // Skip this contribution if age calculation fails
+            return;
+          }
+
+          const decayFactor = Math.exp(-timeDecayFactor * ageInDays);
+          if (!isFinite(decayFactor) || decayFactor < 0) {
+            console.warn(`Invalid decay factor for contribution ${index}, using 0:`, decayFactor);
+            return;
+          }
+
+          const weight = algorithmWeights[contribution.type] || 1;
+          if (typeof weight !== 'number' || weight < 0) {
+            console.warn(`Invalid weight for contribution type ${contribution.type}, using 1`);
+            // Use default weight
+          }
+          
+          // Boost verified contributions (x402 protocol: transaction-verified signals)
+          const verificationBoost = contribution.verified 
+            ? this.SCORING_WEIGHTS.verificationBoost 
+            : 1.0;
+          
+          // Verifier boost (up to 25% for 5+ verifiers)
+          const verifierCount = contribution.verifierCount || 0;
+          const verifierBoost = verifierCount > 0
+            ? 1 + (Math.min(verifierCount, this.SCORING_WEIGHTS.maxVerifiers) * 
+                   this.SCORING_WEIGHTS.verifierBoostPerVerifier)
+            : 1.0;
+          
+          const score = contribution.weight * weight * decayFactor * verificationBoost * verifierBoost;
+          if (!isFinite(score) || score < 0) {
+            console.warn(`Invalid score calculation for contribution ${index}, skipping:`, score);
+            return;
+          }
+
+          breakdown[contribution.type] = (breakdown[contribution.type] || 0) + score;
+        } catch (error) {
+          console.warn(`Error processing contribution at index ${index}:`, error);
+          // Continue processing other contributions
+        }
+      });
+
+      const overall = Object.values(breakdown).reduce((sum, score) => {
+        if (!isFinite(score)) {
+          console.warn(`Invalid score in breakdown, skipping:`, score);
+          return sum;
+        }
+        return sum + score;
+      }, 0);
+
+      if (!isFinite(overall)) {
+        throw new Error('Calculated overall score is not finite');
+      }
+
+      return { breakdown, overall };
+    } catch (error) {
+      throw new Error(`Failed to calculate contribution scores: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
    * Apply payment-weighted reputation boost
+   * 
+   * @throws {Error} If invalid input data is provided
    */
   private applyPaymentBoost(overall: number, verifiedPayments: VerifiedPayment[]): number {
-    if (verifiedPayments.length === 0) return overall;
-    
-    const paymentBoost = this.calculatePaymentWeightedBoost(verifiedPayments);
-    return overall * (1 + paymentBoost);
+    try {
+      if (typeof overall !== 'number' || !isFinite(overall) || overall < 0) {
+        throw new Error('Invalid overall score: must be a finite non-negative number');
+      }
+      if (!Array.isArray(verifiedPayments)) {
+        throw new Error('VerifiedPayments must be an array');
+      }
+
+      if (verifiedPayments.length === 0) return overall;
+      
+      const paymentBoost = this.calculatePaymentWeightedBoost(verifiedPayments);
+      if (!isFinite(paymentBoost) || paymentBoost < 0) {
+        console.warn('Invalid payment boost calculated, using 0:', paymentBoost);
+        return overall;
+      }
+
+      const boosted = overall * (1 + paymentBoost);
+      if (!isFinite(boosted) || boosted < 0) {
+        console.warn('Invalid boosted score calculated, returning original:', boosted);
+        return overall;
+      }
+
+      return boosted;
+    } catch (error) {
+      console.warn(`Failed to apply payment boost:`, error);
+      return overall; // Return original score on error
+    }
   }
 
   /**
    * Apply reputation registry boost
+   * 
+   * @throws {Error} If invalid input data is provided
    */
   private applyRegistryBoost(overall: number, reputationRegistry?: ReputationRegistry): number {
-    if (!reputationRegistry || reputationRegistry.ratings.length === 0) return overall;
-    
-    const registryBoost = this.calculateRegistryBoost(reputationRegistry);
-    return overall * (1 + registryBoost);
+    try {
+      if (typeof overall !== 'number' || !isFinite(overall) || overall < 0) {
+        throw new Error('Invalid overall score: must be a finite non-negative number');
+      }
+
+      if (!reputationRegistry || !reputationRegistry.ratings || reputationRegistry.ratings.length === 0) {
+        return overall;
+      }
+      
+      const registryBoost = this.calculateRegistryBoost(reputationRegistry);
+      if (!isFinite(registryBoost) || registryBoost < 0) {
+        console.warn('Invalid registry boost calculated, using 0:', registryBoost);
+        return overall;
+      }
+
+      const boosted = overall * (1 + registryBoost);
+      if (!isFinite(boosted) || boosted < 0) {
+        console.warn('Invalid boosted score calculated, returning original:', boosted);
+        return overall;
+      }
+
+      return boosted;
+    } catch (error) {
+      console.warn(`Failed to apply registry boost:`, error);
+      return overall; // Return original score on error
+    }
   }
 
   /**
@@ -411,50 +586,123 @@ export class ReputationCalculator {
 
   /**
    * Calculate bot detection penalty for a specific user
+   * 
+   * @throws {Error} If invalid input data is provided
    */
   private calculateBotDetectionPenalty(
     userId: string,
     botDetectionResults: BotDetectionResults
   ): { penalty: number; sybilRisk: number } {
-    // Check if user is in a confirmed bot cluster
-    const confirmedCluster = botDetectionResults.confirmedBotClusters.find(cluster =>
-      cluster.nodes.includes(userId)
-    );
+    try {
+      if (typeof userId !== 'string' || userId.length === 0) {
+        throw new Error('Invalid userId: must be a non-empty string');
+      }
+      if (!botDetectionResults || typeof botDetectionResults !== 'object') {
+        throw new Error('BotDetectionResults must be a valid object');
+      }
 
-    if (confirmedCluster) {
-      // Significant penalty for confirmed bots (70% penalty)
-      return {
-        penalty: Math.min(0.7, confirmedCluster.suspicionScore * 0.7),
-        sybilRisk: confirmedCluster.suspicionScore,
-      };
+      // Check if user is in a confirmed bot cluster
+      if (Array.isArray(botDetectionResults.confirmedBotClusters)) {
+        const confirmedCluster = botDetectionResults.confirmedBotClusters.find(cluster => {
+          try {
+            return cluster && Array.isArray(cluster.nodes) && cluster.nodes.includes(userId);
+          } catch (error) {
+            console.warn('Error checking confirmed bot cluster:', error);
+            return false;
+          }
+        });
+
+        if (confirmedCluster) {
+          try {
+            const suspicionScore = typeof confirmedCluster.suspicionScore === 'number' && 
+                                 isFinite(confirmedCluster.suspicionScore) &&
+                                 confirmedCluster.suspicionScore >= 0 &&
+                                 confirmedCluster.suspicionScore <= 1
+              ? confirmedCluster.suspicionScore
+              : 0.5; // Default if invalid
+
+            // Significant penalty for confirmed bots (70% penalty)
+            const penalty = Math.min(0.7, suspicionScore * 0.7);
+            return {
+              penalty: isFinite(penalty) ? Math.max(0, penalty) : 0,
+              sybilRisk: Math.max(0, Math.min(1, isFinite(suspicionScore) ? suspicionScore : 0)),
+            };
+          } catch (error) {
+            console.warn('Error processing confirmed bot cluster penalty:', error);
+          }
+        }
+      }
+
+      // Check if user is in a suspicious cluster
+      if (Array.isArray(botDetectionResults.suspiciousClusters)) {
+        const suspiciousCluster = botDetectionResults.suspiciousClusters.find(cluster => {
+          try {
+            return cluster && Array.isArray(cluster.nodes) && cluster.nodes.includes(userId);
+          } catch (error) {
+            console.warn('Error checking suspicious cluster:', error);
+            return false;
+          }
+        });
+
+        if (suspiciousCluster) {
+          try {
+            const suspicionScore = typeof suspiciousCluster.suspicionScore === 'number' && 
+                                 isFinite(suspiciousCluster.suspicionScore) &&
+                                 suspiciousCluster.suspicionScore >= 0 &&
+                                 suspiciousCluster.suspicionScore <= 1
+              ? suspiciousCluster.suspicionScore
+              : 0.3; // Default if invalid
+
+            // Smaller penalty for suspicious clusters (30% penalty)
+            const penalty = Math.min(0.3, suspicionScore * 0.3);
+            return {
+              penalty: isFinite(penalty) ? Math.max(0, penalty) : 0,
+              sybilRisk: Math.max(0, Math.min(1, isFinite(suspicionScore) ? suspicionScore : 0)),
+            };
+          } catch (error) {
+            console.warn('Error processing suspicious cluster penalty:', error);
+          }
+        }
+      }
+
+      // Check if user is an individual bot
+      if (Array.isArray(botDetectionResults.individualBots)) {
+        const individualBot = botDetectionResults.individualBots.find(bot => {
+          try {
+            return bot && bot.node === userId;
+          } catch (error) {
+            console.warn('Error checking individual bot:', error);
+            return false;
+          }
+        });
+
+        if (individualBot) {
+          try {
+            const sybilRisk = typeof individualBot.sybilRisk === 'number' && 
+                            isFinite(individualBot.sybilRisk) &&
+                            individualBot.sybilRisk >= 0 &&
+                            individualBot.sybilRisk <= 1
+              ? individualBot.sybilRisk
+              : 0.3; // Default if invalid
+
+            // Penalty based on sybil risk
+            const penalty = Math.min(0.5, sybilRisk * 0.5);
+            return {
+              penalty: isFinite(penalty) ? Math.max(0, penalty) : 0,
+              sybilRisk: Math.max(0, Math.min(1, isFinite(sybilRisk) ? sybilRisk : 0)),
+            };
+          } catch (error) {
+            console.warn('Error processing individual bot penalty:', error);
+          }
+        }
+      }
+
+      // No penalty
+      return { penalty: 0, sybilRisk: 0 };
+    } catch (error) {
+      console.warn(`Failed to calculate bot detection penalty for user ${userId}:`, error);
+      return { penalty: 0, sybilRisk: 0 }; // Return no penalty on error (conservative approach)
     }
-
-    // Check if user is in a suspicious cluster
-    const suspiciousCluster = botDetectionResults.suspiciousClusters.find(cluster =>
-      cluster.nodes.includes(userId)
-    );
-
-    if (suspiciousCluster) {
-      // Smaller penalty for suspicious clusters (30% penalty)
-      return {
-        penalty: Math.min(0.3, suspiciousCluster.suspicionScore * 0.3),
-        sybilRisk: suspiciousCluster.suspicionScore,
-      };
-    }
-
-    // Check if user is an individual bot
-    const individualBot = botDetectionResults.individualBots.find(bot => bot.node === userId);
-
-    if (individualBot) {
-      // Penalty based on sybil risk
-      return {
-        penalty: Math.min(0.5, individualBot.sybilRisk * 0.5),
-        sybilRisk: individualBot.sybilRisk,
-      };
-    }
-
-    // No penalty
-    return { penalty: 0, sybilRisk: 0 };
   }
 
   /**
@@ -473,77 +721,193 @@ export class ReputationCalculator {
    * 1. Technical sophistication (ability to handle HTTP 402 flow)
    * 2. Cryptographic security (on-chain verification)
    * 3. Agent autonomy (no human intervention required)
+   * 
+   * @throws {Error} If invalid payment data is provided
    */
   private calculatePaymentWeightedBoost(payments: VerifiedPayment[]): number {
-    if (payments.length === 0) return 0;
-
-    const verifiedPayments = payments.filter(p => p.verified);
-    if (verifiedPayments.length === 0) return 0;
-
-    let weightedSum = 0;
-    let totalValue = 0;
-    let x402PaymentCount = 0; // Track x402 protocol payments for additional boost
-    let x402PaymentValue = 0; // Track total value of x402 payments
-
-    verifiedPayments.forEach(payment => {
-      const value = payment.amount;
-      const payerRep = payment.payerReputation || 0.5; // Default 0.5 if unknown
-      
-      totalValue += value;
-      // Weight = amount * payer_reputation (TraceRank principle)
-      weightedSum += value * payerRep;
-      
-      // Identify x402 protocol payments
-      // x402 payments are HTTP-native, stateless, and cryptographically verified
-      // Indicators: USDC currency, chain specified, or explicit x402 flag
-      const isX402Payment = payment.currency === 'USDC' && 
-                           (payment.chain || payment.verified) &&
-                           // Additional check: x402 payments typically have txHash
-                           payment.txHash;
-      
-      if (isX402Payment) {
-        x402PaymentCount++;
-        x402PaymentValue += value;
+    try {
+      if (!Array.isArray(payments)) {
+        throw new Error('Payments must be an array');
       }
-    });
 
-    // Normalize: boost = (weighted_average - 0.5) * 0.2
-    // Max boost: 10% for perfect weighted average
-    const weightedAverage = totalValue > 0 ? weightedSum / totalValue : 0;
-    let baseBoost = Math.max(0, (weightedAverage - 0.5) * 0.2);
-    
-    // Additional boost for x402 protocol payments (up to 5% extra)
-    // x402 payments are cryptographically secured and represent autonomous agent commerce
-    // The boost scales with both count and value of x402 payments
-    const x402PaymentRatio = verifiedPayments.length > 0 
-      ? x402PaymentCount / verifiedPayments.length 
-      : 0;
-    const x402ValueRatio = totalValue > 0 
-      ? x402PaymentValue / totalValue 
-      : 0;
-    
-    // Combined boost: considers both payment count and value
-    // This rewards users who receive significant x402 payments
-    const x402Boost = Math.min(
-      0.05, 
-      (x402PaymentRatio * 0.03) + (x402ValueRatio * 0.02)
-    );
-    
-    return baseBoost + x402Boost;
+      if (payments.length === 0) return 0;
+
+      const verifiedPayments = payments.filter(p => p && p.verified === true);
+      if (verifiedPayments.length === 0) return 0;
+
+      let weightedSum = 0;
+      let totalValue = 0;
+      let x402PaymentCount = 0; // Track x402 protocol payments for additional boost
+      let x402PaymentValue = 0; // Track total value of x402 payments
+
+      verifiedPayments.forEach((payment, index) => {
+        try {
+          if (!payment || typeof payment !== 'object') {
+            console.warn(`Invalid payment at index ${index}, skipping`);
+            return;
+          }
+
+          const value = typeof payment.amount === 'number' && isFinite(payment.amount) && payment.amount >= 0
+            ? payment.amount
+            : 0;
+          
+          if (value <= 0) {
+            console.warn(`Invalid payment amount at index ${index}, skipping:`, payment.amount);
+            return;
+          }
+
+          const payerRep = typeof payment.payerReputation === 'number' && 
+                          isFinite(payment.payerReputation) && 
+                          payment.payerReputation >= 0 && 
+                          payment.payerReputation <= 1
+            ? payment.payerReputation
+            : 0.5; // Default 0.5 if unknown
+          
+          totalValue += value;
+          // Weight = amount * payer_reputation (TraceRank principle)
+          const weighted = value * payerRep;
+          if (isFinite(weighted)) {
+            weightedSum += weighted;
+          }
+          
+          // Identify x402 protocol payments
+          // x402 payments are HTTP-native, stateless, and cryptographically verified
+          // Indicators: USDC currency, chain specified, or explicit x402 flag
+          const isX402Payment = payment.currency === 'USDC' && 
+                               (payment.chain || payment.verified) &&
+                               // Additional check: x402 payments typically have txHash
+                               payment.txHash;
+          
+          if (isX402Payment) {
+            x402PaymentCount++;
+            x402PaymentValue += value;
+          }
+        } catch (error) {
+          console.warn(`Error processing payment at index ${index}:`, error);
+          // Continue processing other payments
+        }
+      });
+
+      if (totalValue <= 0) {
+        return 0; // No valid payments
+      }
+
+      // Normalize: boost = (weighted_average - 0.5) * 0.2
+      // Max boost: 10% for perfect weighted average
+      const weightedAverage = weightedSum / totalValue;
+      if (!isFinite(weightedAverage)) {
+        console.warn('Invalid weighted average calculated, using 0:', weightedAverage);
+        return 0;
+      }
+
+      let baseBoost = Math.max(0, (weightedAverage - 0.5) * 0.2);
+      if (!isFinite(baseBoost)) {
+        baseBoost = 0;
+      }
+      
+      // Additional boost for x402 protocol payments (up to 5% extra)
+      // x402 payments are cryptographically secured and represent autonomous agent commerce
+      // The boost scales with both count and value of x402 payments
+      const x402PaymentRatio = verifiedPayments.length > 0 
+        ? x402PaymentCount / verifiedPayments.length 
+        : 0;
+      const x402ValueRatio = totalValue > 0 
+        ? x402PaymentValue / totalValue 
+        : 0;
+      
+      if (!isFinite(x402PaymentRatio) || !isFinite(x402ValueRatio)) {
+        console.warn('Invalid x402 ratios calculated, using 0');
+        return baseBoost;
+      }
+      
+      // Combined boost: considers both payment count and value
+      // This rewards users who receive significant x402 payments
+      const x402Boost = Math.min(
+        0.05, 
+        (x402PaymentRatio * 0.03) + (x402ValueRatio * 0.02)
+      );
+      
+      if (!isFinite(x402Boost)) {
+        console.warn('Invalid x402 boost calculated, using 0:', x402Boost);
+        return baseBoost;
+      }
+      
+      const totalBoost = baseBoost + x402Boost;
+      return isFinite(totalBoost) ? Math.max(0, totalBoost) : 0;
+    } catch (error) {
+      console.warn(`Failed to calculate payment weighted boost:`, error);
+      return 0; // Return 0 boost on error
+    }
   }
 
   /**
    * Calculate reputation registry boost from verified ratings
+   * 
+   * @throws {Error} If invalid registry data is provided
    */
   private calculateRegistryBoost(registry: ReputationRegistry): number {
-    const verifiedRatings = registry.ratings.filter(r => r.verified);
-    if (verifiedRatings.length === 0) return 0;
+    try {
+      if (!registry || typeof registry !== 'object') {
+        throw new Error('Registry must be a valid object');
+      }
+      if (!Array.isArray(registry.ratings)) {
+        throw new Error('Registry ratings must be an array');
+      }
 
-    const avgRating = verifiedRatings.reduce((sum, r) => sum + r.rating, 0) / verifiedRatings.length;
-    
-    // Boost = (avg_rating - 0.5) * 0.15
-    // Max boost: 7.5% for perfect average rating
-    return Math.max(0, (avgRating - 0.5) * 0.15);
+      const verifiedRatings = registry.ratings.filter(r => r && r.verified === true);
+      if (verifiedRatings.length === 0) return 0;
+
+      let totalRating = 0;
+      let validRatings = 0;
+
+      verifiedRatings.forEach((rating, index) => {
+        try {
+          if (!rating || typeof rating !== 'object') {
+            console.warn(`Invalid rating at index ${index}, skipping`);
+            return;
+          }
+
+          const ratingValue = typeof rating.rating === 'number' && 
+                             isFinite(rating.rating) && 
+                             rating.rating >= 0 && 
+                             rating.rating <= 1
+            ? rating.rating
+            : null;
+
+          if (ratingValue === null) {
+            console.warn(`Invalid rating value at index ${index}, skipping:`, rating.rating);
+            return;
+          }
+
+          totalRating += ratingValue;
+          validRatings++;
+        } catch (error) {
+          console.warn(`Error processing rating at index ${index}:`, error);
+          // Continue processing other ratings
+        }
+      });
+
+      if (validRatings === 0) return 0;
+
+      const avgRating = totalRating / validRatings;
+      if (!isFinite(avgRating)) {
+        console.warn('Invalid average rating calculated, using 0:', avgRating);
+        return 0;
+      }
+      
+      // Boost = (avg_rating - 0.5) * 0.15
+      // Max boost: 7.5% for perfect average rating
+      const boost = (avgRating - 0.5) * 0.15;
+      if (!isFinite(boost)) {
+        console.warn('Invalid boost calculated, using 0:', boost);
+        return 0;
+      }
+
+      return Math.max(0, boost);
+    } catch (error) {
+      console.warn(`Failed to calculate registry boost:`, error);
+      return 0; // Return 0 boost on error
+    }
   }
 
   /**
@@ -555,6 +919,8 @@ export class ReputationCalculator {
    * 3. Validation mechanisms (cryptographic proofs)
    * 4. Verified payment history (x402 transactions)
    * 5. Continuous update and dynamic scoring
+   * 
+   * @throws {Error} If calculation encounters critical errors
    */
   private async determineHighlyTrustedUser(params: {
     userId: string;
@@ -564,135 +930,213 @@ export class ReputationCalculator {
     reputationRegistry?: ReputationRegistry;
     contributions: Contribution[];
   }): Promise<HighlyTrustedUserStatus> {
-    const { userId, overall, onChainIdentity, verifiedPayments, reputationRegistry, contributions } = params;
-    
-    const now = Date.now();
-    const explanation: string[] = [];
-    
-    // 1. On-chain identity verification
-    const identityVerificationScore = this.calculateIdentityVerificationScore(onChainIdentity);
-    const onChainIdentityVerified = identityVerificationScore >= this.HIGHLY_TRUSTED_THRESHOLDS.minIdentityVerificationScore;
-    
-    if (onChainIdentityVerified) {
-      explanation.push(`✓ On-chain identity verified (score: ${(identityVerificationScore * 100).toFixed(1)}%)`);
-    } else {
-      explanation.push(`✗ On-chain identity verification insufficient (score: ${(identityVerificationScore * 100).toFixed(1)}%)`);
+    try {
+      const { userId, overall, onChainIdentity, verifiedPayments, reputationRegistry, contributions } = params;
+      
+      if (typeof userId !== 'string' || userId.length === 0) {
+        throw new Error('Invalid userId: must be a non-empty string');
+      }
+      if (typeof overall !== 'number' || !isFinite(overall) || overall < 0) {
+        throw new Error('Invalid overall score: must be a finite non-negative number');
+      }
+      if (!Array.isArray(verifiedPayments)) {
+        throw new Error('VerifiedPayments must be an array');
+      }
+      if (!Array.isArray(contributions)) {
+        throw new Error('Contributions must be an array');
+      }
+      
+      const now = Date.now();
+      const explanation: string[] = [];
+      
+      // 1. On-chain identity verification
+      let identityVerificationScore = 0;
+      try {
+        identityVerificationScore = this.calculateIdentityVerificationScore(onChainIdentity);
+      } catch (error) {
+        console.warn(`Failed to calculate identity verification score for ${userId}:`, error);
+        identityVerificationScore = 0;
+      }
+      const onChainIdentityVerified = identityVerificationScore >= this.HIGHLY_TRUSTED_THRESHOLDS.minIdentityVerificationScore;
+      
+      if (onChainIdentityVerified) {
+        explanation.push(`✓ On-chain identity verified (score: ${(identityVerificationScore * 100).toFixed(1)}%)`);
+      } else {
+        explanation.push(`✗ On-chain identity verification insufficient (score: ${(identityVerificationScore * 100).toFixed(1)}%)`);
+      }
+
+      // 2. Minimum reputation score
+      const minReputationScore = overall >= this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore;
+      if (minReputationScore) {
+        explanation.push(`✓ Reputation score above threshold (${overall.toFixed(0)} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore})`);
+      } else {
+        explanation.push(`✗ Reputation score below threshold (${overall.toFixed(0)} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore})`);
+      }
+
+      // 3. Verified payment history (x402 protocol)
+      const verifiedPaymentsOnly = verifiedPayments.filter(p => p && p.verified === true);
+      let paymentHistoryScore = 0;
+      let totalPaymentValue = 0;
+      try {
+        paymentHistoryScore = this.calculatePaymentHistoryScore(verifiedPaymentsOnly);
+        totalPaymentValue = verifiedPaymentsOnly.reduce((sum, p) => {
+          const amount = typeof p.amount === 'number' && isFinite(p.amount) && p.amount >= 0 ? p.amount : 0;
+          return sum + amount;
+        }, 0);
+      } catch (error) {
+        console.warn(`Failed to calculate payment history score for ${userId}:`, error);
+        paymentHistoryScore = 0;
+        totalPaymentValue = 0;
+      }
+      
+      const minVerifiedPayments = verifiedPaymentsOnly.length >= this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments;
+      const minPaymentValue = totalPaymentValue >= this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue;
+      
+      if (minVerifiedPayments) {
+        explanation.push(`✓ Sufficient verified payments (${verifiedPaymentsOnly.length} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments})`);
+      } else {
+        explanation.push(`✗ Insufficient verified payments (${verifiedPaymentsOnly.length} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments})`);
+      }
+
+      if (minPaymentValue) {
+        explanation.push(`✓ Total payment value sufficient (${totalPaymentValue.toFixed(2)} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue})`);
+      } else {
+        explanation.push(`✗ Total payment value insufficient (${totalPaymentValue.toFixed(2)} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue})`);
+      }
+
+      // 4. Reputation registry (verified ratings)
+      let registryScore = 0;
+      let verifiedRatings: Array<{ rating: number }> = [];
+      let avgRating = 0;
+      try {
+        registryScore = reputationRegistry 
+          ? this.calculateReputationRegistryScore(reputationRegistry)
+          : 0;
+        verifiedRatings = reputationRegistry?.ratings?.filter(r => r && r.verified === true) || [];
+        if (verifiedRatings.length > 0) {
+          const totalRating = verifiedRatings.reduce((sum, r) => {
+            const rating = typeof r.rating === 'number' && isFinite(r.rating) && r.rating >= 0 && r.rating <= 1
+              ? r.rating
+              : 0;
+            return sum + rating;
+          }, 0);
+          avgRating = totalRating / verifiedRatings.length;
+        }
+      } catch (error) {
+        console.warn(`Failed to calculate reputation registry score for ${userId}:`, error);
+        registryScore = 0;
+        verifiedRatings = [];
+        avgRating = 0;
+      }
+      
+      const minVerifiedRatings = verifiedRatings.length >= this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings;
+      const minRatingAverage = avgRating >= this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage;
+      
+      if (minVerifiedRatings) {
+        explanation.push(`✓ Sufficient verified ratings (${verifiedRatings.length} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings})`);
+      } else {
+        explanation.push(`✗ Insufficient verified ratings (${verifiedRatings.length} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings})`);
+      }
+
+      if (minRatingAverage) {
+        explanation.push(`✓ Average rating above threshold (${(avgRating * 100).toFixed(1)}% >= ${(this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage * 100)}%)`);
+      } else {
+        explanation.push(`✗ Average rating below threshold (${(avgRating * 100).toFixed(1)}% < ${(this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage * 100)}%)`);
+      }
+
+      // 5. Validation mechanisms (cryptographic proofs, TEE, zk proofs)
+      let validationScore = 0;
+      try {
+        validationScore = reputationRegistry && Array.isArray(reputationRegistry.validations)
+          ? this.calculateValidationScore(reputationRegistry.validations)
+          : 0;
+      } catch (error) {
+        console.warn(`Failed to calculate validation score for ${userId}:`, error);
+        validationScore = 0;
+      }
+
+      // 6. Temporal consistency (recent activity)
+      let temporalConsistencyScore = 0;
+      try {
+        temporalConsistencyScore = this.calculateTemporalConsistencyScore(contributions, verifiedPaymentsOnly);
+      } catch (error) {
+        console.warn(`Failed to calculate temporal consistency score for ${userId}:`, error);
+        temporalConsistencyScore = 0;
+      }
+      const positiveRecentActivity = temporalConsistencyScore >= this.HIGHLY_TRUSTED_THRESHOLDS.minTemporalConsistency;
+      
+      if (positiveRecentActivity) {
+        explanation.push(`✓ Positive recent activity detected (consistency: ${(temporalConsistencyScore * 100).toFixed(1)}%)`);
+      } else {
+        explanation.push(`✗ Insufficient recent activity (consistency: ${(temporalConsistencyScore * 100).toFixed(1)}%)`);
+      }
+
+      // 7. Sybil resistance (payment pattern analysis)
+      let sybilResistant = false;
+      try {
+        sybilResistant = await this.assessSybilResistance(verifiedPaymentsOnly);
+      } catch (error) {
+        console.warn(`Failed to assess Sybil resistance for ${userId}:`, error);
+        sybilResistant = false; // Default to false on error (more conservative)
+      }
+
+      // Aggregate requirements
+      const requirements = {
+        onChainIdentityVerified,
+        minReputationScore,
+        minVerifiedPayments: minVerifiedPayments && minPaymentValue, // Both count and value must pass
+        minVerifiedRatings: minVerifiedRatings && minRatingAverage, // Both count and average must pass
+        positiveRecentActivity,
+        sybilResistant,
+      };
+
+      // Count passed requirements
+      const passedRequirements = Object.values(requirements).filter(v => v).length;
+      
+      // Highly trusted if minimum requirements met (at least 5 out of 6 requirements)
+      const isHighlyTrusted = passedRequirements >= 5;
+
+      // Calculate overall confidence using weighted factors
+      const trustFactors = {
+        identityVerificationScore: Math.max(0, Math.min(1, identityVerificationScore)),
+        paymentHistoryScore: Math.max(0, Math.min(1, paymentHistoryScore)),
+        reputationRegistryScore: Math.max(0, Math.min(1, registryScore)),
+        validationScore: Math.max(0, Math.min(1, validationScore)),
+        temporalConsistencyScore: Math.max(0, Math.min(1, temporalConsistencyScore)),
+      };
+
+      const confidence = (
+        trustFactors.identityVerificationScore * this.CONFIDENCE_WEIGHTS.identityVerification +
+        trustFactors.paymentHistoryScore * this.CONFIDENCE_WEIGHTS.paymentHistory +
+        trustFactors.reputationRegistryScore * this.CONFIDENCE_WEIGHTS.reputationRegistry +
+        trustFactors.validationScore * this.CONFIDENCE_WEIGHTS.validation +
+        trustFactors.temporalConsistencyScore * this.CONFIDENCE_WEIGHTS.temporalConsistency
+      );
+
+      if (!isFinite(confidence) || confidence < 0 || confidence > 1) {
+        console.warn(`Invalid confidence calculated for ${userId}, clamping to 0-1:`, confidence);
+      }
+
+      // Determine trust level based on thresholds
+      let trustLevel: HighlyTrustedUserStatus['trustLevel'];
+      try {
+        trustLevel = this.determineTrustLevel(overall, confidence, isHighlyTrusted);
+      } catch (error) {
+        console.warn(`Failed to determine trust level for ${userId}:`, error);
+        trustLevel = 'untrusted'; // Default to most conservative level
+      }
+
+      return {
+        isHighlyTrusted,
+        confidence: Math.max(0, Math.min(1, isFinite(confidence) ? confidence : 0)),
+        requirements,
+        trustFactors,
+        trustLevel,
+        explanation,
+      };
+    } catch (error) {
+      throw new Error(`Failed to determine highly trusted user status for ${params.userId}: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    // 2. Minimum reputation score
-    const minReputationScore = overall >= this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore;
-    if (minReputationScore) {
-      explanation.push(`✓ Reputation score above threshold (${overall.toFixed(0)} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore})`);
-    } else {
-      explanation.push(`✗ Reputation score below threshold (${overall.toFixed(0)} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minReputationScore})`);
-    }
-
-    // 3. Verified payment history (x402 protocol)
-    const verifiedPaymentsOnly = verifiedPayments.filter(p => p.verified);
-    const paymentHistoryScore = this.calculatePaymentHistoryScore(verifiedPaymentsOnly);
-    const totalPaymentValue = verifiedPaymentsOnly.reduce((sum, p) => sum + p.amount, 0);
-    
-    const minVerifiedPayments = verifiedPaymentsOnly.length >= this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments;
-    const minPaymentValue = totalPaymentValue >= this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue;
-    
-    if (minVerifiedPayments) {
-      explanation.push(`✓ Sufficient verified payments (${verifiedPaymentsOnly.length} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments})`);
-    } else {
-      explanation.push(`✗ Insufficient verified payments (${verifiedPaymentsOnly.length} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments})`);
-    }
-
-    if (minPaymentValue) {
-      explanation.push(`✓ Total payment value sufficient (${totalPaymentValue.toFixed(2)} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue})`);
-    } else {
-      explanation.push(`✗ Total payment value insufficient (${totalPaymentValue.toFixed(2)} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue})`);
-    }
-
-    // 4. Reputation registry (verified ratings)
-    const registryScore = reputationRegistry 
-      ? this.calculateReputationRegistryScore(reputationRegistry)
-      : 0;
-    const verifiedRatings = reputationRegistry?.ratings.filter(r => r.verified) || [];
-    const avgRating = verifiedRatings.length > 0
-      ? verifiedRatings.reduce((sum, r) => sum + r.rating, 0) / verifiedRatings.length
-      : 0;
-    
-    const minVerifiedRatings = verifiedRatings.length >= this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings;
-    const minRatingAverage = avgRating >= this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage;
-    
-    if (minVerifiedRatings) {
-      explanation.push(`✓ Sufficient verified ratings (${verifiedRatings.length} >= ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings})`);
-    } else {
-      explanation.push(`✗ Insufficient verified ratings (${verifiedRatings.length} < ${this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings})`);
-    }
-
-    if (minRatingAverage) {
-      explanation.push(`✓ Average rating above threshold (${(avgRating * 100).toFixed(1)}% >= ${(this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage * 100)}%)`);
-    } else {
-      explanation.push(`✗ Average rating below threshold (${(avgRating * 100).toFixed(1)}% < ${(this.HIGHLY_TRUSTED_THRESHOLDS.minRatingAverage * 100)}%)`);
-    }
-
-    // 5. Validation mechanisms (cryptographic proofs, TEE, zk proofs)
-    const validationScore = reputationRegistry
-      ? this.calculateValidationScore(reputationRegistry.validations)
-      : 0;
-
-    // 6. Temporal consistency (recent activity)
-    const temporalConsistencyScore = this.calculateTemporalConsistencyScore(contributions, verifiedPaymentsOnly);
-    const positiveRecentActivity = temporalConsistencyScore >= this.HIGHLY_TRUSTED_THRESHOLDS.minTemporalConsistency;
-    
-    if (positiveRecentActivity) {
-      explanation.push(`✓ Positive recent activity detected (consistency: ${(temporalConsistencyScore * 100).toFixed(1)}%)`);
-    } else {
-      explanation.push(`✗ Insufficient recent activity (consistency: ${(temporalConsistencyScore * 100).toFixed(1)}%)`);
-    }
-
-    // 7. Sybil resistance (payment pattern analysis)
-    const sybilResistant = await this.assessSybilResistance(verifiedPaymentsOnly);
-
-    // Aggregate requirements
-    const requirements = {
-      onChainIdentityVerified,
-      minReputationScore,
-      minVerifiedPayments: minVerifiedPayments && minPaymentValue, // Both count and value must pass
-      minVerifiedRatings: minVerifiedRatings && minRatingAverage, // Both count and average must pass
-      positiveRecentActivity,
-      sybilResistant,
-    };
-
-    // Count passed requirements
-    const passedRequirements = Object.values(requirements).filter(v => v).length;
-    
-    // Highly trusted if minimum requirements met (at least 5 out of 6 requirements)
-    const isHighlyTrusted = passedRequirements >= 5;
-
-    // Calculate overall confidence using weighted factors
-    const trustFactors = {
-      identityVerificationScore: Math.max(0, Math.min(1, identityVerificationScore)),
-      paymentHistoryScore: Math.max(0, Math.min(1, paymentHistoryScore)),
-      reputationRegistryScore: Math.max(0, Math.min(1, registryScore)),
-      validationScore: Math.max(0, Math.min(1, validationScore)),
-      temporalConsistencyScore: Math.max(0, Math.min(1, temporalConsistencyScore)),
-    };
-
-    const confidence = (
-      trustFactors.identityVerificationScore * this.CONFIDENCE_WEIGHTS.identityVerification +
-      trustFactors.paymentHistoryScore * this.CONFIDENCE_WEIGHTS.paymentHistory +
-      trustFactors.reputationRegistryScore * this.CONFIDENCE_WEIGHTS.reputationRegistry +
-      trustFactors.validationScore * this.CONFIDENCE_WEIGHTS.validation +
-      trustFactors.temporalConsistencyScore * this.CONFIDENCE_WEIGHTS.temporalConsistency
-    );
-
-    // Determine trust level based on thresholds
-    const trustLevel = this.determineTrustLevel(overall, confidence, isHighlyTrusted);
-
-    return {
-      isHighlyTrusted,
-      confidence,
-      requirements,
-      trustFactors,
-      trustLevel,
-      explanation,
-    };
   }
 
   /**
@@ -723,115 +1167,305 @@ export class ReputationCalculator {
   /**
    * Calculate identity verification score (0-1)
    * Based on NFT identity, SBT credentials, and cross-chain verification
+   * 
+   * @throws {Error} If invalid identity data is provided
    */
   private calculateIdentityVerificationScore(identity?: OnChainIdentity): number {
-    if (!identity) return 0;
+    try {
+      if (!identity) return 0;
 
-    let score = 0;
+      if (typeof identity !== 'object') {
+        throw new Error('Identity must be a valid object');
+      }
 
-    // NFT Identity verification
-    if (identity.nftIdentity?.verified) {
-      score += this.IDENTITY_WEIGHTS.nftIdentity;
+      let score = 0;
+
+      // NFT Identity verification
+      try {
+        if (identity.nftIdentity && 
+            typeof identity.nftIdentity === 'object' && 
+            identity.nftIdentity.verified === true) {
+          const nftWeight = this.IDENTITY_WEIGHTS.nftIdentity;
+          if (isFinite(nftWeight) && nftWeight >= 0) {
+            score += nftWeight;
+          }
+        }
+      } catch (error) {
+        console.warn('Error processing NFT identity:', error);
+        // Continue with other identity checks
+      }
+
+      // SBT Credential verification
+      try {
+        if (identity.sbtCredential && 
+            typeof identity.sbtCredential === 'object' && 
+            identity.sbtCredential.verified === true) {
+          const sbtWeight = this.IDENTITY_WEIGHTS.sbtCredential;
+          if (isFinite(sbtWeight) && sbtWeight >= 0) {
+            score += sbtWeight;
+          }
+        }
+      } catch (error) {
+        console.warn('Error processing SBT credential:', error);
+        // Continue with other identity checks
+      }
+
+      // Cross-chain verification bonus
+      try {
+        if (Array.isArray(identity.verifiedChains) && 
+            identity.verifiedChains.length >= this.IDENTITY_WEIGHTS.minChainsForCrossChain) {
+          const chainCount = identity.verifiedChains.length;
+          const crossChainBonus = Math.min(
+            this.IDENTITY_WEIGHTS.crossChainBase,
+            chainCount * this.IDENTITY_WEIGHTS.crossChainPerChain
+          );
+          if (isFinite(crossChainBonus) && crossChainBonus >= 0) {
+            score += crossChainBonus;
+          }
+        }
+      } catch (error) {
+        console.warn('Error processing cross-chain verification:', error);
+        // Continue with other identity checks
+      }
+
+      // Wallet address verification (optional bonus)
+      try {
+        if (identity.walletAddress && typeof identity.walletAddress === 'string' && identity.walletAddress.length > 0) {
+          const walletWeight = this.IDENTITY_WEIGHTS.walletAddress;
+          if (isFinite(walletWeight) && walletWeight >= 0) {
+            score += walletWeight;
+          }
+        }
+      } catch (error) {
+        console.warn('Error processing wallet address:', error);
+        // Continue
+      }
+
+      // Clamp to 0-1 range
+      const finalScore = isFinite(score) ? score : 0;
+      return Math.max(0, Math.min(1.0, finalScore));
+    } catch (error) {
+      console.warn(`Failed to calculate identity verification score:`, error);
+      return 0; // Return 0 on error
     }
-
-    // SBT Credential verification
-    if (identity.sbtCredential?.verified) {
-      score += this.IDENTITY_WEIGHTS.sbtCredential;
-    }
-
-    // Cross-chain verification bonus
-    if (identity.verifiedChains && 
-        identity.verifiedChains.length >= this.IDENTITY_WEIGHTS.minChainsForCrossChain) {
-      const crossChainBonus = Math.min(
-        this.IDENTITY_WEIGHTS.crossChainBase,
-        identity.verifiedChains.length * this.IDENTITY_WEIGHTS.crossChainPerChain
-      );
-      score += crossChainBonus;
-    }
-
-    // Wallet address verification (optional bonus)
-    if (identity.walletAddress) {
-      score += this.IDENTITY_WEIGHTS.walletAddress;
-    }
-
-    // Clamp to 0-1 range
-    return Math.max(0, Math.min(1.0, score));
   }
 
   /**
    * Calculate payment history score (0-1)
    * Based on number of payments, total value, and recency
+   * 
+   * @throws {Error} If invalid payment data is provided
    */
   private calculatePaymentHistoryScore(payments: VerifiedPayment[]): number {
-    if (payments.length === 0) return 0;
+    try {
+      if (!Array.isArray(payments)) {
+        throw new Error('Payments must be an array');
+      }
 
-    const now = Date.now();
-    const totalValue = payments.reduce((sum, p) => sum + p.amount, 0);
-    
-    // Payment count score (0-0.4)
-    const countScore = Math.min(0.4, payments.length / this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments * 0.4);
-    
-    // Payment value score (0-0.4)
-    const valueScore = Math.min(0.4, totalValue / this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue * 0.4);
-    
-    // Recency score (0-0.2) - recent payments weighted higher
-    const recentPayments = payments.filter(p => 
-      (now - p.timestamp) < (this.HIGHLY_TRUSTED_THRESHOLDS.minRecentActivityDays * 24 * 60 * 60 * 1000)
-    );
-    const recencyScore = recentPayments.length > 0 ? 0.2 : 0;
+      if (payments.length === 0) return 0;
 
-    return countScore + valueScore + recencyScore;
+      const now = Date.now();
+      let totalValue = 0;
+      let validPayments = 0;
+
+      payments.forEach((payment, index) => {
+        try {
+          if (!payment || typeof payment !== 'object') {
+            console.warn(`Invalid payment at index ${index} in payment history score, skipping`);
+            return;
+          }
+
+          const amount = typeof payment.amount === 'number' && isFinite(payment.amount) && payment.amount >= 0
+            ? payment.amount
+            : 0;
+          
+          if (amount > 0) {
+            totalValue += amount;
+            validPayments++;
+          }
+        } catch (error) {
+          console.warn(`Error processing payment at index ${index} in payment history score:`, error);
+          // Continue processing other payments
+        }
+      });
+
+      if (validPayments === 0) return 0;
+      
+      // Payment count score (0-0.4)
+      const countScore = Math.min(0.4, validPayments / this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedPayments * 0.4);
+      if (!isFinite(countScore) || countScore < 0) {
+        console.warn('Invalid count score calculated, using 0');
+        return 0;
+      }
+      
+      // Payment value score (0-0.4)
+      const valueScore = totalValue > 0 && this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue > 0
+        ? Math.min(0.4, totalValue / this.HIGHLY_TRUSTED_THRESHOLDS.minPaymentValue * 0.4)
+        : 0;
+      if (!isFinite(valueScore) || valueScore < 0) {
+        console.warn('Invalid value score calculated, using 0');
+        return countScore;
+      }
+      
+      // Recency score (0-0.2) - recent payments weighted higher
+      const recentWindow = this.HIGHLY_TRUSTED_THRESHOLDS.minRecentActivityDays * 24 * 60 * 60 * 1000;
+      const recentPayments = payments.filter(p => {
+        if (!p || typeof p.timestamp !== 'number' || !isFinite(p.timestamp)) {
+          return false;
+        }
+        const diff = now - p.timestamp;
+        return isFinite(diff) && diff >= 0 && diff < recentWindow;
+      });
+      const recencyScore = recentPayments.length > 0 ? 0.2 : 0;
+
+      const totalScore = countScore + valueScore + recencyScore;
+      return Math.max(0, Math.min(1, isFinite(totalScore) ? totalScore : 0));
+    } catch (error) {
+      console.warn(`Failed to calculate payment history score:`, error);
+      return 0; // Return 0 on error
+    }
   }
 
   /**
    * Calculate reputation registry score (0-1)
    * Based on verified ratings and feedback
+   * 
+   * @throws {Error} If invalid registry data is provided
    */
   private calculateReputationRegistryScore(registry: ReputationRegistry): number {
-    const verifiedRatings = registry.ratings.filter(r => r.verified);
-    if (verifiedRatings.length === 0) return 0;
+    try {
+      if (!registry || typeof registry !== 'object') {
+        throw new Error('Registry must be a valid object');
+      }
+      if (!Array.isArray(registry.ratings)) {
+        throw new Error('Registry ratings must be an array');
+      }
 
-    const avgRating = verifiedRatings.reduce((sum, r) => sum + r.rating, 0) / verifiedRatings.length;
-    const countScore = Math.min(0.6, verifiedRatings.length / this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings * 0.6);
-    const ratingScore = avgRating * 0.4;
+      const verifiedRatings = registry.ratings.filter(r => r && r.verified === true);
+      if (verifiedRatings.length === 0) return 0;
 
-    return countScore + ratingScore;
+      let totalRating = 0;
+      let validRatings = 0;
+
+      verifiedRatings.forEach((rating, index) => {
+        try {
+          if (!rating || typeof rating !== 'object') {
+            console.warn(`Invalid rating at index ${index} in registry score, skipping`);
+            return;
+          }
+
+          const ratingValue = typeof rating.rating === 'number' && 
+                             isFinite(rating.rating) && 
+                             rating.rating >= 0 && 
+                             rating.rating <= 1
+            ? rating.rating
+            : null;
+
+          if (ratingValue === null) {
+            console.warn(`Invalid rating value at index ${index}, skipping:`, rating.rating);
+            return;
+          }
+
+          totalRating += ratingValue;
+          validRatings++;
+        } catch (error) {
+          console.warn(`Error processing rating at index ${index} in registry score:`, error);
+          // Continue processing other ratings
+        }
+      });
+
+      if (validRatings === 0) return 0;
+
+      const avgRating = totalRating / validRatings;
+      if (!isFinite(avgRating) || avgRating < 0 || avgRating > 1) {
+        console.warn('Invalid average rating calculated, using 0:', avgRating);
+        return 0;
+      }
+
+      const countScore = this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings > 0
+        ? Math.min(0.6, validRatings / this.HIGHLY_TRUSTED_THRESHOLDS.minVerifiedRatings * 0.6)
+        : 0;
+      if (!isFinite(countScore) || countScore < 0) {
+        console.warn('Invalid count score calculated, using 0');
+        return avgRating * 0.4;
+      }
+
+      const ratingScore = avgRating * 0.4;
+      if (!isFinite(ratingScore) || ratingScore < 0) {
+        console.warn('Invalid rating score calculated, using count score only');
+        return countScore;
+      }
+
+      const totalScore = countScore + ratingScore;
+      return Math.max(0, Math.min(1, isFinite(totalScore) ? totalScore : 0));
+    } catch (error) {
+      console.warn(`Failed to calculate reputation registry score:`, error);
+      return 0; // Return 0 on error
+    }
   }
 
   /**
    * Calculate validation score (0-1)
    * Based on cryptographic proofs, TEE attestations, zk proofs
+   * 
+   * @throws {Error} If invalid validation data is provided
    */
   private calculateValidationScore(validations: ReputationRegistry['validations']): number {
-    if (validations.length === 0) return 0;
-
-    const verifiedValidations = validations.filter(v => v.verified);
-    if (verifiedValidations.length === 0) return 0;
-
-    // Higher weight for cryptographic and TEE validations
-    let weightedSum = 0;
-    verifiedValidations.forEach(v => {
-      switch (v.validationType) {
-        case 'cryptographic':
-          weightedSum += 1.0;
-          break;
-        case 'third-party':
-          weightedSum += 0.8;
-          break;
-        case 'community':
-          weightedSum += 0.5;
-          break;
+    try {
+      if (!Array.isArray(validations)) {
+        throw new Error('Validations must be an array');
       }
-    });
 
-    // Normalize: max score = 1.0 for 3+ cryptographic validations
-    return Math.min(1.0, weightedSum / 3.0);
+      if (validations.length === 0) return 0;
+
+      const verifiedValidations = validations.filter(v => v && v.verified === true);
+      if (verifiedValidations.length === 0) return 0;
+
+      // Higher weight for cryptographic and TEE validations
+      let weightedSum = 0;
+      verifiedValidations.forEach((v, index) => {
+        try {
+          if (!v || typeof v !== 'object') {
+            console.warn(`Invalid validation at index ${index}, skipping`);
+            return;
+          }
+
+          const validationType = v.validationType;
+          switch (validationType) {
+            case 'cryptographic':
+              weightedSum += 1.0;
+              break;
+            case 'third-party':
+              weightedSum += 0.8;
+              break;
+            case 'community':
+              weightedSum += 0.5;
+              break;
+            default:
+              console.warn(`Unknown validation type at index ${index}: ${validationType}, using 0.3`);
+              weightedSum += 0.3; // Default weight for unknown types
+              break;
+          }
+        } catch (error) {
+          console.warn(`Error processing validation at index ${index}:`, error);
+          // Continue processing other validations
+        }
+      });
+
+      if (!isFinite(weightedSum) || weightedSum < 0) {
+        console.warn('Invalid weighted sum calculated, using 0:', weightedSum);
+        return 0;
+      }
+
+      // Normalize: max score = 1.0 for 3+ cryptographic validations
+      const score = weightedSum / 3.0;
+      return Math.max(0, Math.min(1.0, isFinite(score) ? score : 0));
+    } catch (error) {
+      console.warn(`Failed to calculate validation score:`, error);
+      return 0; // Return 0 on error
+    }
   }
 
-  /**
-   * Calculate temporal consistency score (0-1)
-   * Measures recent activity and consistency over time
-   */
   /**
    * Calculate temporal consistency score (0-1)
    * Measures recent activity and consistency over time
@@ -891,52 +1525,95 @@ export class ReputationCalculator {
   /**
    * Assess Sybil resistance based on payment patterns
    * Detects coordinated attacks and suspicious patterns
-   */
-  /**
-   * Assess Sybil resistance based on payment patterns
-   * Detects coordinated attacks and suspicious patterns
    * 
    * @param payments - Verified payments to analyze
    * @returns true if payment patterns indicate low Sybil risk, false otherwise
    */
   private async assessSybilResistance(payments: VerifiedPayment[]): Promise<boolean> {
-    if (payments.length < this.SYBIL_THRESHOLDS.minPaymentsForAssessment) {
-      return true; // Not enough data to assess - assume safe
+    try {
+      if (!Array.isArray(payments)) {
+        throw new Error('Payments must be an array');
+      }
+
+      if (payments.length < this.SYBIL_THRESHOLDS.minPaymentsForAssessment) {
+        return true; // Not enough data to assess - assume safe
+      }
+
+      // Analyze payment patterns
+      const recipients = new Set<string>();
+      const amounts: number[] = [];
+      const timestamps: number[] = [];
+
+      payments.forEach((payment, index) => {
+        try {
+          if (!payment || typeof payment !== 'object') {
+            console.warn(`Invalid payment at index ${index} in Sybil assessment, skipping`);
+            return;
+          }
+
+          if (payment.recipient && typeof payment.recipient === 'string') {
+            recipients.add(payment.recipient);
+          }
+
+          const amount = typeof payment.amount === 'number' && isFinite(payment.amount) && payment.amount >= 0
+            ? payment.amount
+            : 0;
+          amounts.push(amount);
+
+          const timestamp = typeof payment.timestamp === 'number' && isFinite(payment.timestamp) && payment.timestamp > 0
+            ? payment.timestamp
+            : 0;
+          if (timestamp > 0) {
+            timestamps.push(timestamp);
+          }
+        } catch (error) {
+          console.warn(`Error processing payment at index ${index} in Sybil assessment:`, error);
+          // Continue processing other payments
+        }
+      });
+
+      if (amounts.length === 0 || timestamps.length === 0) {
+        return true; // Not enough valid data to assess - assume safe
+      }
+
+      // Sybil indicators
+      // 1. Many small payments to same recipient (suspicious pattern)
+      const uniqueRecipients = recipients.size;
+      const totalAmount = amounts.reduce((a, b) => a + b, 0);
+      const avgAmount = totalAmount / amounts.length;
+      
+      if (!isFinite(avgAmount) || avgAmount < 0) {
+        console.warn('Invalid average amount calculated in Sybil assessment, assuming safe');
+        return true;
+      }
+
+      const sameRecipientRatio = payments.length > 0 ? uniqueRecipients / payments.length : 1;
+      if (!isFinite(sameRecipientRatio) || sameRecipientRatio < 0 || sameRecipientRatio > 1) {
+        console.warn('Invalid recipient ratio calculated in Sybil assessment, assuming safe');
+        return true;
+      }
+
+      // 2. Payment bursts (coordinated activity)
+      const now = Date.now();
+      const recentPayments = timestamps.filter(ts => {
+        const diff = now - ts;
+        return isFinite(diff) && diff >= 0 && diff < this.SYBIL_THRESHOLDS.burstWindowMs;
+      }).length;
+
+      // Sybil risk flags
+      const hasSameRecipientPattern = 
+        sameRecipientRatio < this.SYBIL_THRESHOLDS.suspiciousRecipientRatio &&
+        payments.length > this.SYBIL_THRESHOLDS.suspiciousPaymentCount &&
+        avgAmount < this.SYBIL_THRESHOLDS.suspiciousAvgAmount;
+      
+      const hasBurstPattern = recentPayments > this.SYBIL_THRESHOLDS.burstThreshold;
+
+      // Low Sybil risk if patterns are normal
+      return !hasSameRecipientPattern && !hasBurstPattern;
+    } catch (error) {
+      console.warn(`Failed to assess Sybil resistance:`, error);
+      return false; // Default to false on error (more conservative - assume risky)
     }
-
-    // Analyze payment patterns
-    const recipients = new Set<string>();
-    const amounts: number[] = [];
-    const timestamps: number[] = [];
-
-    payments.forEach(payment => {
-      if (payment.recipient) recipients.add(payment.recipient);
-      amounts.push(Math.max(0, payment.amount)); // Ensure non-negative
-      timestamps.push(payment.timestamp);
-    });
-
-    // Sybil indicators
-    // 1. Many small payments to same recipient (suspicious pattern)
-    const uniqueRecipients = recipients.size;
-    const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-    const sameRecipientRatio = uniqueRecipients / payments.length;
-
-    // 2. Payment bursts (coordinated activity)
-    const now = Date.now();
-    const recentPayments = timestamps.filter(ts => 
-      (now - ts) < this.SYBIL_THRESHOLDS.burstWindowMs
-    ).length;
-
-    // Sybil risk flags
-    const hasSameRecipientPattern = 
-      sameRecipientRatio < this.SYBIL_THRESHOLDS.suspiciousRecipientRatio &&
-      payments.length > this.SYBIL_THRESHOLDS.suspiciousPaymentCount &&
-      avgAmount < this.SYBIL_THRESHOLDS.suspiciousAvgAmount;
-    
-    const hasBurstPattern = recentPayments > this.SYBIL_THRESHOLDS.burstThreshold;
-
-    // Low Sybil risk if patterns are normal
-    return !hasSameRecipientPattern && !hasBurstPattern;
   }
 
   /**
@@ -947,30 +1624,67 @@ export class ReputationCalculator {
    * @returns Promise resolving to percentile (0-100)
    */
   private async calculatePercentile(userId: string, score: number): Promise<number> {
-    // In production, this would query a cloud database
-    const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
-    
     try {
-      const response = await fetch(`${analyticsEndpoint}/percentile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, score }),
-        signal: AbortSignal.timeout(5000), // 5 second timeout
-      });
+      if (typeof userId !== 'string' || userId.length === 0) {
+        throw new Error('Invalid userId: must be a non-empty string');
+      }
+      if (typeof score !== 'number' || !isFinite(score) || score < 0) {
+        throw new Error('Invalid score: must be a finite non-negative number');
+      }
 
-      if (response.ok) {
-        const data = await response.json();
-        if (typeof data.percentile === 'number' && data.percentile >= 0 && data.percentile <= 100) {
-          return data.percentile;
+      // In production, this would query a cloud database
+      const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
+      
+      if (typeof analyticsEndpoint !== 'string' || analyticsEndpoint.length === 0) {
+        throw new Error('Invalid analytics endpoint');
+      }
+
+      try {
+        const response = await fetch(`${analyticsEndpoint}/percentile`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, score }),
+          signal: AbortSignal.timeout(5000), // 5 second timeout
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data && typeof data.percentile === 'number' && 
+              isFinite(data.percentile) && 
+              data.percentile >= 0 && 
+              data.percentile <= 100) {
+            return data.percentile;
+          } else {
+            console.warn(`Invalid percentile data received for user ${userId}:`, data);
+          }
+        } else {
+          console.warn(`Failed to calculate percentile from cloud for user ${userId}: HTTP ${response.status}`);
+        }
+      } catch (fetchError) {
+        // Handle network errors, timeouts, etc.
+        if (fetchError instanceof Error) {
+          if (fetchError.name === 'AbortError' || fetchError.message.includes('timeout')) {
+            console.warn(`Timeout calculating percentile from cloud for user ${userId}`);
+          } else {
+            console.warn(`Network error calculating percentile from cloud for user ${userId}:`, fetchError.message);
+          }
+        } else {
+          console.warn(`Failed to calculate percentile from cloud for user ${userId}:`, fetchError);
         }
       }
     } catch (error) {
-      console.warn(`Failed to calculate percentile from cloud for user ${userId}, using default:`, error);
+      console.warn(`Error in calculatePercentile for user ${userId}:`, error);
     }
 
     // Default percentile calculation (mock)
     // Assumes max score of 1000
-    return Math.min(100, Math.max(0, (score / 1000) * 100));
+    try {
+      const defaultPercentile = (score / 1000) * 100;
+      return Math.min(100, Math.max(0, isFinite(defaultPercentile) ? defaultPercentile : 0));
+    } catch (error) {
+      console.warn(`Failed to calculate default percentile for user ${userId}:`, error);
+      return 0; // Return 0 as fallback
+    }
   }
 
   /**
@@ -980,31 +1694,58 @@ export class ReputationCalculator {
    * @returns Promise resolving to rank (lower is better, 0 = top rank)
    */
   private async calculateRank(userId: string): Promise<number> {
-    // In production, this would query a cloud database
-    const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
-    
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      if (process.env.CLOUD_API_KEY) {
-        headers['Authorization'] = `Bearer ${process.env.CLOUD_API_KEY}`;
+      if (typeof userId !== 'string' || userId.length === 0) {
+        throw new Error('Invalid userId: must be a non-empty string');
       }
 
-      const response = await fetch(`${analyticsEndpoint}/rank/${userId}`, {
-        headers,
-        signal: AbortSignal.timeout(5000), // 5 second timeout
-      });
+      // In production, this would query a cloud database
+      const analyticsEndpoint = process.env.CLOUD_ANALYTICS_ENDPOINT || 'https://analytics.dotrep.cloud';
+      
+      if (typeof analyticsEndpoint !== 'string' || analyticsEndpoint.length === 0) {
+        throw new Error('Invalid analytics endpoint');
+      }
 
-      if (response.ok) {
-        const data = await response.json();
-        if (typeof data.rank === 'number' && data.rank >= 0) {
-          return data.rank;
+      try {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        
+        if (process.env.CLOUD_API_KEY && typeof process.env.CLOUD_API_KEY === 'string') {
+          headers['Authorization'] = `Bearer ${process.env.CLOUD_API_KEY}`;
+        }
+
+        const response = await fetch(`${analyticsEndpoint}/rank/${encodeURIComponent(userId)}`, {
+          headers,
+          signal: AbortSignal.timeout(5000), // 5 second timeout
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data && typeof data.rank === 'number' && 
+              isFinite(data.rank) && 
+              data.rank >= 0) {
+            return data.rank;
+          } else {
+            console.warn(`Invalid rank data received for user ${userId}:`, data);
+          }
+        } else {
+          console.warn(`Failed to calculate rank from cloud for user ${userId}: HTTP ${response.status}`);
+        }
+      } catch (fetchError) {
+        // Handle network errors, timeouts, etc.
+        if (fetchError instanceof Error) {
+          if (fetchError.name === 'AbortError' || fetchError.message.includes('timeout')) {
+            console.warn(`Timeout calculating rank from cloud for user ${userId}`);
+          } else {
+            console.warn(`Network error calculating rank from cloud for user ${userId}:`, fetchError.message);
+          }
+        } else {
+          console.warn(`Failed to calculate rank from cloud for user ${userId}:`, fetchError);
         }
       }
     } catch (error) {
-      console.warn(`Failed to calculate rank from cloud for user ${userId}, using default:`, error);
+      console.warn(`Error in calculateRank for user ${userId}:`, error);
     }
 
     // Default rank (mock)
@@ -1093,6 +1834,7 @@ export class ReputationCalculator {
    * @param reputationScore - Calculated reputation score
    * @param contributions - User contributions
    * @param metadata - Additional metadata to include
+   * @throws {Error} If publishing fails
    */
   private async publishReputationToDKG(
     dkgClient: any,
@@ -1102,29 +1844,82 @@ export class ReputationCalculator {
     metadata: Record<string, any>
   ): Promise<void> {
     try {
+      if (!dkgClient || typeof dkgClient !== 'object') {
+        throw new Error('Invalid DKG client: must be a valid object');
+      }
+      if (typeof userId !== 'string' || userId.length === 0) {
+        throw new Error('Invalid userId: must be a non-empty string');
+      }
+      if (!reputationScore || typeof reputationScore !== 'object') {
+        throw new Error('Invalid reputationScore: must be a valid object');
+      }
+      if (!Array.isArray(contributions)) {
+        throw new Error('Contributions must be an array');
+      }
+      if (!metadata || typeof metadata !== 'object') {
+        throw new Error('Metadata must be a valid object');
+      }
+
+      if (typeof dkgClient.publishReputationAsset !== 'function') {
+        throw new Error('DKG client does not have publishReputationAsset method');
+      }
+
+      // Build contributions array with error handling
+      const contributionData = contributions.map((c, index) => {
+        try {
+          if (!c || typeof c !== 'object') {
+            console.warn(`Invalid contribution at index ${index}, skipping`);
+            return null;
+          }
+
+          const timestamp = typeof c.timestamp === 'number' && isFinite(c.timestamp) && c.timestamp > 0
+            ? c.timestamp
+            : Date.now();
+
+          return {
+            id: typeof c.id === 'string' ? c.id : `contribution-${index}`,
+            type: typeof c.type === 'string' ? c.type : 'unknown',
+            url: '',
+            title: typeof c.type === 'string' ? c.type : 'Unknown Contribution',
+            date: new Date(timestamp).toISOString(),
+            impact: typeof c.weight === 'number' && isFinite(c.weight) && c.weight >= 0 ? c.weight : 0
+          };
+        } catch (error) {
+          console.warn(`Error processing contribution at index ${index}:`, error);
+          return null;
+        }
+      }).filter(c => c !== null);
+
       const reputationAsset = {
         developerId: userId,
-        reputationScore: reputationScore.overall,
-        contributions: contributions.map(c => ({
-          id: c.id,
-          type: c.type as any,
-          url: '',
-          title: c.type,
-          date: new Date(c.timestamp).toISOString(),
-          impact: c.weight
-        })),
+        reputationScore: typeof reputationScore.overall === 'number' && isFinite(reputationScore.overall)
+          ? Math.max(0, reputationScore.overall)
+          : 0,
+        contributions: contributionData,
         timestamp: Date.now(),
         metadata: {
           ...metadata,
-          breakdown: reputationScore.breakdown,
-          percentile: reputationScore.percentile,
-          rank: reputationScore.rank,
-          safetyScore: reputationScore.safetyScore,
-          combinedScore: reputationScore.combinedScore,
-          sybilRisk: reputationScore.sybilRisk,
-          botDetectionPenalty: reputationScore.botDetectionPenalty,
-          highlyTrusted: reputationScore.highlyTrustedStatus?.isHighlyTrusted,
-          trustLevel: reputationScore.highlyTrustedStatus?.trustLevel,
+          breakdown: reputationScore.breakdown || {},
+          percentile: typeof reputationScore.percentile === 'number' && isFinite(reputationScore.percentile)
+            ? Math.max(0, Math.min(100, reputationScore.percentile))
+            : 0,
+          rank: typeof reputationScore.rank === 'number' && isFinite(reputationScore.rank)
+            ? Math.max(0, reputationScore.rank)
+            : 0,
+          safetyScore: typeof reputationScore.safetyScore === 'number' && isFinite(reputationScore.safetyScore)
+            ? reputationScore.safetyScore
+            : undefined,
+          combinedScore: typeof reputationScore.combinedScore === 'number' && isFinite(reputationScore.combinedScore)
+            ? reputationScore.combinedScore
+            : undefined,
+          sybilRisk: typeof reputationScore.sybilRisk === 'number' && isFinite(reputationScore.sybilRisk)
+            ? reputationScore.sybilRisk
+            : undefined,
+          botDetectionPenalty: typeof reputationScore.botDetectionPenalty === 'number' && isFinite(reputationScore.botDetectionPenalty)
+            ? reputationScore.botDetectionPenalty
+            : undefined,
+          highlyTrusted: reputationScore.highlyTrustedStatus?.isHighlyTrusted === true,
+          trustLevel: reputationScore.highlyTrustedStatus?.trustLevel || 'untrusted',
           source: 'reputation_calculator',
           version: '1.0.0',
           // MCP metadata for AI agent integration
@@ -1139,10 +1934,15 @@ export class ReputationCalculator {
 
       const result = await dkgClient.publishReputationAsset(reputationAsset, 2); // Store for 2 epochs
       
-      console.log(`✅ Published reputation to DKG for ${userId}: ${result.UAL}`);
+      if (result && result.UAL) {
+        console.log(`✅ Published reputation to DKG for ${userId}: ${result.UAL}`);
+      } else {
+        console.warn(`⚠️ Published reputation to DKG for ${userId} but no UAL returned`);
+      }
     } catch (error) {
-      console.error(`❌ Failed to publish reputation to DKG for ${userId}:`, error);
-      throw error;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Failed to publish reputation to DKG for ${userId}:`, errorMessage);
+      throw new Error(`Failed to publish reputation to DKG: ${errorMessage}`);
     }
   }
 }
