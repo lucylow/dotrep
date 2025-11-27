@@ -14,6 +14,8 @@
  * - Fairness in network-based ranking
  */
 
+import { AccountClusteringService, type Account } from './account-clustering';
+
 export interface GraphNode {
   id: string;
   metadata?: {
@@ -581,18 +583,66 @@ export class GraphAlgorithms {
       neighbors.get(edge.target)!.add(edge.source);
     });
 
-    // Step 1: Community detection to find tightly-knit clusters
-    const communities = this.detectCommunities(nodes, edges);
-    const communitySizes = new Map<number, number>();
-    communities.forEach(communityId => {
-      communitySizes.set(communityId, (communitySizes.get(communityId) || 0) + 1);
+    // Step 1: Enhanced community detection using advanced clustering
+    // Convert to Account format for clustering service
+    const accounts: Account[] = nodes.map(node => {
+      const nodeEdges = edges.filter(e => e.source === node.id || e.target === node.id);
+      return {
+        accountId: node.id,
+        reputation: scores.get(node.id) || 0,
+        contributions: [],
+        connections: nodeEdges
+          .filter(e => e.source === node.id)
+          .map(e => ({
+            target: e.target,
+            weight: e.weight,
+          })),
+        metadata: {
+          stake: node.metadata?.stake,
+          paymentHistory: node.metadata?.paymentHistory,
+          ...node.metadata,
+        },
+      };
     });
 
-    // Step 2: Calculate community metrics
-    const nodeToCommunity = new Map<string, number>();
-    communities.forEach((communityId, index) => {
-      nodeToCommunity.set(nodes[index].id, communityId);
+    // Use hierarchical clustering for better community detection
+    const clusteringService = new AccountClusteringService({
+      method: 'hierarchical',
+      minSimilarity: 0.25,
+      minClusterSize: 3,
+      maxClusterSize: 1000,
+      featureWeights: {
+        sharedConnections: 0.3,
+        connectionOverlap: 0.3,
+        temporalSimilarity: 0.15,
+        metadataSimilarity: 0.15,
+        graphDistance: 0.1,
+      },
     });
+
+    const clusters = clusteringService.findClusters(accounts);
+    
+    // Map clusters to community IDs (compatible with existing code)
+    const nodeToCommunity = new Map<string, number>();
+    const communitySizes = new Map<number, number>();
+    clusters.forEach((cluster, clusterIdx) => {
+      cluster.accounts.forEach(accountId => {
+        nodeToCommunity.set(accountId, clusterIdx);
+      });
+      communitySizes.set(clusterIdx, cluster.size);
+    });
+
+    // Assign unclustered nodes to their own communities
+    let nextCommunityId = clusters.length;
+    nodes.forEach(node => {
+      if (!nodeToCommunity.has(node.id)) {
+        nodeToCommunity.set(node.id, nextCommunityId);
+        communitySizes.set(nextCommunityId, 1);
+        nextCommunityId++;
+      }
+    });
+
+    // Step 2: Calculate community metrics (existing logic continues)
 
     // Step 3: Compute external connection ratio for each community
     const communityExternalConnections = new Map<number, number>();

@@ -15,6 +15,7 @@
 import { DKGClient } from '../../dkg-integration/dkg-client';
 import { getPolkadotApi, type PolkadotApiService } from './polkadotApi';
 import { getSybilDetectionService, type SybilDetectionResult } from './sybilDetection';
+import { AccountClusteringService, type Account } from '../../dkg-integration/account-clustering';
 
 // ============================================================================
 // Types & Interfaces
@@ -293,10 +294,25 @@ export class TrustNavigatorAgent {
 export class SybilDetectiveAgent {
   private sybilService: ReturnType<typeof getSybilDetectionService>;
   private dkgClient: DKGClient;
+  private clusteringService: AccountClusteringService;
 
   constructor(dkgClient: DKGClient) {
     this.sybilService = getSybilDetectionService();
     this.dkgClient = dkgClient;
+    // Use connectivity-based clustering with optimized settings for Sybil detection
+    this.clusteringService = new AccountClusteringService({
+      method: 'connectivity',
+      minSimilarity: 0.3,
+      minClusterSize: 2,
+      maxClusterSize: 1000,
+      featureWeights: {
+        sharedConnections: 0.35,
+        connectionOverlap: 0.3,
+        temporalSimilarity: 0.2,
+        metadataSimilarity: 0.1,
+        graphDistance: 0.05,
+      },
+    });
   }
 
   /**
@@ -391,36 +407,33 @@ export class SybilDetectiveAgent {
     detectionResults: Array<{ accountId: string; result: SybilDetectionResult }>,
     graphData: Array<{ accountId: string; connections: Array<{ target: string }> }>
   ): SybilCluster[] {
-    const sybilAccounts = detectionResults
+    // Filter to only Sybil accounts for clustering
+    const sybilAccountIds = detectionResults
       .filter(r => r.result.isSybil)
       .map(r => r.accountId);
 
-    // Simple clustering: group accounts with mutual connections
-    const clusters: Map<string, Set<string>> = new Map();
-    let clusterId = 0;
+    if (sybilAccountIds.length === 0) return [];
 
-    for (const accountId of sybilAccounts) {
-      const account = graphData.find(a => a.accountId === accountId);
-      if (!account) continue;
+    // Convert to Account format for clustering service
+    const accounts: Account[] = graphData
+      .filter(a => sybilAccountIds.includes(a.accountId))
+      .map(a => ({
+        accountId: a.accountId,
+        reputation: 0, // Will be updated from detection results
+        contributions: [], // Can be enhanced with actual contribution data
+        connections: a.connections.map(c => ({
+          target: c.target,
+          weight: 'weight' in c ? c.weight : 1,
+        })),
+        metadata: {},
+      }));
 
-      // Find existing cluster or create new one
-      let assigned = false;
-      for (const [cid, members] of clusters.entries()) {
-        if (members.has(accountId) || 
-            account.connections.some(c => members.has(c.target))) {
-          members.add(accountId);
-          assigned = true;
-          break;
-        }
-      }
+    // Use advanced clustering service
+    const clusters = this.clusteringService.findClusters(accounts);
 
-      if (!assigned) {
-        clusters.set(`cluster-${clusterId++}`, new Set([accountId]));
-      }
-    }
-
-    return Array.from(clusters.entries()).map(([clusterId, members]) => {
-      const accounts = Array.from(members).map(id => {
+    // Convert to SybilCluster format
+    return clusters.map(cluster => {
+      const accounts = cluster.accounts.map(id => {
         const result = detectionResults.find(r => r.accountId === id);
         const account = graphData.find(a => a.accountId === id);
         return {
@@ -430,17 +443,24 @@ export class SybilDetectiveAgent {
         };
       });
 
+      // Calculate risk level based on cluster metrics
       const avgRisk = accounts.reduce((sum, a) => sum + a.riskScore, 0) / accounts.length;
-      const riskLevel = avgRisk < 0.3 ? 'low' :
-                       avgRisk < 0.5 ? 'medium' :
-                       avgRisk < 0.7 ? 'high' : 'critical';
+      const combinedRisk = Math.max(avgRisk, cluster.riskScore);
+      
+      const riskLevel = combinedRisk < 0.3 ? 'low' :
+                       combinedRisk < 0.5 ? 'medium' :
+                       combinedRisk < 0.7 ? 'high' : 'critical';
+
+      // Combine patterns from detection results and cluster analysis
+      const detectionPatterns = this.extractPatterns(accounts, detectionResults);
+      const allPatterns = [...new Set([...detectionPatterns, ...cluster.patterns])];
 
       return {
-        clusterId,
+        clusterId: cluster.clusterId,
         accounts,
         riskLevel,
-        patterns: this.extractPatterns(accounts, detectionResults),
-        confidence: avgRisk,
+        patterns: allPatterns,
+        confidence: combinedRisk,
       };
     });
   }

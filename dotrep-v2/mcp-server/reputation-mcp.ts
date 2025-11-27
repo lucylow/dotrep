@@ -393,6 +393,133 @@ class DotRepMCPServer {
           required: ['creator_id'],
         },
       },
+      // User-Flagging Relationship Tools
+      {
+        name: 'create_user_flag',
+        description: 'Create a user flag for harmful content, spam, or coordinated manipulation. Flags are published to DKG as verifiable Knowledge Assets.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            flag_actor: {
+              type: 'string',
+              description: 'DID of the user creating the flag',
+            },
+            flag_target: {
+              type: 'string',
+              description: 'DID of the flagged user or content',
+            },
+            flag_type: {
+              type: 'string',
+              enum: ['SPAM', 'HARASSMENT', 'MISINFORMATION', 'IMPERSONATION', 'ILLEGAL_CONTENT', 'COORDINATED_HARM'],
+              description: 'Type of flag',
+            },
+            confidence: {
+              type: 'number',
+              description: 'Confidence score (0-1)',
+              minimum: 0,
+              maximum: 1,
+            },
+            evidence: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of UALs to supporting evidence',
+            },
+            severity: {
+              type: 'string',
+              enum: ['low', 'medium', 'high', 'critical'],
+              description: 'Severity level',
+              default: 'medium',
+            },
+            reporter_reputation: {
+              type: 'number',
+              description: 'Reputation score of flagging user (0-1)',
+              minimum: 0,
+              maximum: 1,
+            },
+            description: {
+              type: 'string',
+              description: 'Description of the flag',
+            },
+          },
+          required: ['flag_actor', 'flag_target', 'flag_type', 'confidence', 'reporter_reputation'],
+        },
+      },
+      {
+        name: 'analyze_flagging_patterns',
+        description: 'Analyze flagging patterns for a target user to detect coordination, assess risk, and evaluate reporter credibility.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            target_user_did: {
+              type: 'string',
+              description: 'DID of the target user to analyze',
+            },
+            time_window_hours: {
+              type: 'number',
+              description: 'Time window for analysis in hours',
+              default: 24,
+            },
+          },
+          required: ['target_user_did'],
+        },
+      },
+      {
+        name: 'calculate_flagging_impact',
+        description: 'Calculate the impact of flagging patterns on a user\'s reputation score.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            user_did: {
+              type: 'string',
+              description: 'DID of the user',
+            },
+            base_reputation: {
+              type: 'number',
+              description: 'Base reputation score (0-1)',
+              minimum: 0,
+              maximum: 1,
+            },
+          },
+          required: ['user_did', 'base_reputation'],
+        },
+      },
+      {
+        name: 'get_flagging_insights',
+        description: 'Get comprehensive flagging insights including coordination alerts, top flagged users, and reporter analysis.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            time_window_hours: {
+              type: 'number',
+              description: 'Time window for insights in hours',
+              default: 24,
+            },
+          },
+        },
+      },
+      {
+        name: 'automated_content_review',
+        description: 'Automatically review content using Umanitek Guardian and create flags if harmful content is detected.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            content_fingerprint: {
+              type: 'string',
+              description: 'Content fingerprint hash',
+            },
+            content_type: {
+              type: 'string',
+              enum: ['image', 'video', 'text'],
+              description: 'Type of content',
+            },
+            target_user_did: {
+              type: 'string',
+              description: 'DID of the user who created the content',
+            },
+          },
+          required: ['content_fingerprint', 'content_type', 'target_user_did'],
+        },
+      },
       // Social Credit Marketplace Agent Tools
       {
         name: 'query_reputation_scores',
@@ -625,6 +752,22 @@ class DotRepMCPServer {
 
           case 'get_creator_safety_score':
             return await this.getCreatorSafetyScore(args);
+
+          // User-Flagging Relationship Tools
+          case 'create_user_flag':
+            return await this.createUserFlag(args);
+
+          case 'analyze_flagging_patterns':
+            return await this.analyzeFlaggingPatterns(args);
+
+          case 'calculate_flagging_impact':
+            return await this.calculateFlaggingImpact(args);
+
+          case 'get_flagging_insights':
+            return await this.getFlaggingInsights(args);
+
+          case 'automated_content_review':
+            return await this.automatedContentReview(args);
 
           // Social Credit Marketplace Agent Tools
           case 'query_reputation_scores':
@@ -1217,6 +1360,162 @@ class DotRepMCPServer {
       };
     } catch (error) {
       throw new Error(`Failed to get creator safety score: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create user flag
+   */
+  private async createUserFlag(args: any) {
+    const {
+      flag_actor,
+      flag_target,
+      flag_type,
+      confidence,
+      evidence = [],
+      severity = 'medium',
+      reporter_reputation,
+      description,
+    } = args;
+
+    try {
+      const { getUserFlaggingService } = await import('../dkg-integration/user-flagging-service');
+      const flaggingService = getUserFlaggingService();
+
+      const result = await flaggingService.createFlag({
+        flagActor: flag_actor,
+        flagTarget: flag_target,
+        flagType: flag_type,
+        confidence,
+        evidence,
+        severity,
+        reporterReputation: reporter_reputation,
+        description,
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              success: true,
+              flagId: result.flagId,
+              ual: result.ual,
+              transactionHash: result.transactionHash,
+              message: `Flag created successfully: ${result.flagId}`,
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to create user flag: ${error.message}`);
+    }
+  }
+
+  /**
+   * Analyze flagging patterns
+   */
+  private async analyzeFlaggingPatterns(args: any) {
+    const { target_user_did, time_window_hours = 24 } = args;
+
+    try {
+      const { getUserFlaggingService } = await import('../dkg-integration/user-flagging-service');
+      const flaggingService = getUserFlaggingService();
+
+      const analysis = await flaggingService.analyzeFlaggingPatterns(
+        target_user_did,
+        time_window_hours
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(analysis, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to analyze flagging patterns: ${error.message}`);
+    }
+  }
+
+  /**
+   * Calculate flagging impact on reputation
+   */
+  private async calculateFlaggingImpact(args: any) {
+    const { user_did, base_reputation } = args;
+
+    try {
+      const { getUserFlaggingService } = await import('../dkg-integration/user-flagging-service');
+      const flaggingService = getUserFlaggingService();
+
+      const impact = await flaggingService.calculateFlaggingImpact(user_did, base_reputation);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(impact, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to calculate flagging impact: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get flagging insights
+   */
+  private async getFlaggingInsights(args: any) {
+    const { time_window_hours = 24 } = args;
+
+    try {
+      const { getFlaggingAnalytics } = await import('../dkg-integration/flagging-analytics');
+      const analytics = getFlaggingAnalytics();
+
+      const insights = await analytics.generateFlaggingInsights(time_window_hours);
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(insights, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get flagging insights: ${error.message}`);
+    }
+  }
+
+  /**
+   * Automated content review
+   */
+  private async automatedContentReview(args: any) {
+    const { content_fingerprint, content_type, target_user_did } = args;
+
+    try {
+      const { getGuardianFlaggingIntegration } = await import('../dkg-integration/guardian-flagging-integration');
+      const guardianIntegration = getGuardianFlaggingIntegration();
+
+      const result = await guardianIntegration.automatedContentReview(
+        content_fingerprint,
+        content_type,
+        target_user_did
+      );
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to perform automated content review: ${error.message}`);
     }
   }
 

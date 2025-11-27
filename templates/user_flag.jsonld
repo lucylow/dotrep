@@ -1,0 +1,35 @@
+{
+  "@context": [
+    "https://schema.org/",
+    "https://trust-net.org/schemas/flagging/v1",
+    {
+      "guardian": "https://umanitek.ai/schemas/verification/v1",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "@type": "UserFlag",
+  "@id": "ual:dkg:userflag:{{flagId}}",
+  "creator": "{{flagActor}}",
+  "about": "{{flagTarget}}",
+  "flagType": "{{flagType}}",
+  "description": "{{description}}",
+  "timestamp": "{{timestamp}}",
+  "confidence": {{confidence}},
+  "evidence": [
+    {
+      "@type": "ForensicEvidence",
+      "ual": "{{evidenceUAL}}",
+      "confidence": {{evidenceConfidence}},
+      "source": "{{evidenceSource}}"
+    }
+  ],
+  "status": "{{status}}",
+  "severity": "{{severity}}",
+  "reporterReputation": {{reporterReputation}},
+  "provenance": {
+    "createdBy": "{{flagActor}}",
+    "anchoredInBlock": "{{blockHash}}",
+    "previousFlags": []
+  }
+}
+

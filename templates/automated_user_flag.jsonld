@@ -1,0 +1,36 @@
+{
+  "@context": [
+    "https://schema.org/",
+    "https://trust-net.org/schemas/flagging/v1",
+    {
+      "guardian": "https://umanitek.ai/schemas/verification/v1",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "@type": "AutomatedUserFlag",
+  "@id": "ual:dkg:autoflag:{{flagId}}",
+  "creator": "did:dkg:agent:umanitek_guardian",
+  "about": "{{flagTarget}}",
+  "flagType": "{{flagType}}",
+  "description": "{{description}}",
+  "timestamp": "{{timestamp}}",
+  "confidence": {{confidence}},
+  "evidence": [
+    {
+      "@type": "GuardianVerification",
+      "matchId": "{{guardianMatchId}}",
+      "matchType": "{{matchType}}",
+      "confidence": {{confidence}},
+      "source": "Umanitek Guardian AI Agent"
+    }
+  ],
+  "status": "auto_verified",
+  "severity": "{{severity}}",
+  "provenance": {
+    "verifiedBy": "Umanitek Guardian",
+    "verificationMethod": "forensic_fingerprint_matching",
+    "automatedAction": true,
+    "matchId": "{{guardianMatchId}}"
+  }
+}
+
