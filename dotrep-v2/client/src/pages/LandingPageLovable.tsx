@@ -18,13 +18,19 @@ import {
   Check,
   Play,
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Navbar } from "@/components/layout/Navbar";
+import { DotRepWalletConnect } from "@/components/wallet";
+import type { WalletConnectionResult } from "@/_core/wallet/DotRepWalletConnection";
 
 export default function LandingPageLovable() {
   const [copied, setCopied] = useState(false);
   const [prUrl, setPrUrl] = useState("");
   const [demoStep, setDemoStep] = useState(0);
+  const [walletDialogOpen, setWalletDialogOpen] = useState(false);
+  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [connectionResult, setConnectionResult] = useState<WalletConnectionResult | null>(null);
+  const [, setLocation] = useLocation();
 
   const copyCommand = () => {
     navigator.clipboard.writeText("npx create-dotrep-app my-app");
@@ -39,6 +45,20 @@ export default function LandingPageLovable() {
     steps.forEach((step, i) => {
       setTimeout(() => setDemoStep(step), (i + 1) * 1000);
     });
+  };
+
+  const handleWalletConnectSuccess = (result: WalletConnectionResult) => {
+    setConnectionResult(result);
+    setIsWalletConnected(true);
+    setWalletDialogOpen(false);
+    // Optionally redirect to dashboard after connection
+    setTimeout(() => {
+      setLocation("/dashboard");
+    }, 1500);
+  };
+
+  const handleWalletConnectError = (error: Error) => {
+    console.error("Wallet connection error:", error);
   };
 
   return (
@@ -120,14 +140,27 @@ export default function LandingPageLovable() {
             transition={{ duration: 0.6, delay: 0.4 }}
             className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-4 mb-12"
           >
-            <Button 
-              className="btn-primary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
-              aria-label="Connect your Polkadot wallet"
-            >
-              <Wallet className="w-5 h-5 mr-2" aria-hidden="true" />
-              <span className="hidden sm:inline">Connect Polkadot Wallet</span>
-              <span className="sm:hidden">Connect Wallet</span>
-            </Button>
+            {isWalletConnected && connectionResult ? (
+              <Button 
+                className="btn-primary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
+                onClick={() => setLocation("/dashboard")}
+                aria-label="Go to dashboard"
+              >
+                <Check className="w-5 h-5 mr-2" aria-hidden="true" />
+                <span>Go to Dashboard</span>
+                <ArrowRight className="w-5 h-5 ml-2" aria-hidden="true" />
+              </Button>
+            ) : (
+              <Button 
+                className="btn-primary px-6 sm:px-8 py-4 sm:py-6 text-base sm:text-lg w-full sm:w-auto"
+                onClick={() => setWalletDialogOpen(true)}
+                aria-label="Connect your Polkadot wallet"
+              >
+                <Wallet className="w-5 h-5 mr-2" aria-hidden="true" />
+                <span className="hidden sm:inline">Connect Polkadot Wallet</span>
+                <span className="sm:hidden">Connect Wallet</span>
+              </Button>
+            )}
             <Link href="/dashboard">
               <Button 
                 variant="outline" 
@@ -532,9 +565,21 @@ await anchorToPolkadotCloud(contribution, signature);`}</code>
             Get started with DotRep in minutes. No complex setup, just install and start building.
           </p>
           <div className="flex items-center justify-center gap-4 mb-8">
-            <Button className="bg-[#ff006e] hover:bg-[#ff66c4] text-white px-8 py-6 text-lg">
-              Start Building
-            </Button>
+            {isWalletConnected ? (
+              <Button 
+                className="bg-[#ff006e] hover:bg-[#ff66c4] text-white px-8 py-6 text-lg"
+                onClick={() => setLocation("/dashboard")}
+              >
+                Go to Dashboard
+              </Button>
+            ) : (
+              <Button 
+                className="bg-[#ff006e] hover:bg-[#ff66c4] text-white px-8 py-6 text-lg"
+                onClick={() => setWalletDialogOpen(true)}
+              >
+                Start Building
+              </Button>
+            )}
             <Link href="/docs">
               <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 px-8 py-6 text-lg">
                 Read Docs
@@ -546,6 +591,17 @@ await anchorToPolkadotCloud(contribution, signature);`}</code>
           </div>
         </div>
       </section>
+
+      {/* Wallet Connection Dialog */}
+      <DotRepWalletConnect
+        open={walletDialogOpen}
+        onOpenChange={setWalletDialogOpen}
+        onSuccess={handleWalletConnectSuccess}
+        onError={handleWalletConnectError}
+        options={{
+          showReputationPreview: true,
+        }}
+      />
 
       {/* Footer */}
       <footer className="border-t border-white/10 bg-black/40 py-12">

@@ -1,7 +1,15 @@
 /**
- * Social Credit Marketplace AI Agent Dashboard
+ * AI Agent Dashboard
  * 
- * Provides a conversational interface for interacting with the 5 specialized AI agents:
+ * Comprehensive dashboard for interacting with all 9 specialized AI agents:
+ * 
+ * Core Agents:
+ * - Misinformation Detection: Detect and analyze false claims
+ * - Truth Verification: Verify claims with blockchain proofs
+ * - Autonomous Transaction: Make reputation-based transaction decisions
+ * - Cross-Chain Reasoning: Reason across multiple Polkadot chains
+ * 
+ * Social Credit Marketplace Agents:
  * - Trust Navigator: Find influencers
  * - Sybil Detective: Detect fake accounts
  * - Contract Negotiator: Negotiate deals
@@ -16,6 +24,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { 
   Search, 
   Shield, 
@@ -24,7 +33,12 @@ import {
   CheckCircle2,
   Sparkles,
   AlertTriangle,
-  DollarSign
+  DollarSign,
+  Bug,
+  Scale,
+  Zap,
+  Network,
+  Brain
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -32,19 +46,44 @@ export default function AgentDashboardPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "system",
-      content: "You are an AI assistant helping with the Social Credit Marketplace. You can help find influencers, detect Sybil accounts, negotiate deals, optimize campaigns, and verify reputation.",
+      content: "You are an AI assistant helping users interact with the DotRep AI Agent system. You can help with misinformation detection, truth verification, autonomous transactions, cross-chain reasoning, finding influencers, detecting Sybil accounts, negotiating deals, optimizing campaigns, and verifying reputation.",
     },
     {
       role: "assistant",
-      content: "👋 Welcome to the Social Credit Marketplace Agent Dashboard!\n\nI can help you with:\n\n🔍 **Trust Navigator** - Find influencers matching your campaign\n🛡️ **Sybil Detective** - Detect fake accounts and clusters\n🤝 **Contract Negotiator** - Negotiate endorsement deals\n📈 **Campaign Optimizer** - Optimize campaign performance\n✅ **Trust Auditor** - Verify reputation and generate reports\n\nWhat would you like to do?",
+      content: "👋 Welcome to the AI Agent Dashboard!\n\nI can help you interact with **9 specialized AI agents**:\n\n**Core Agents:**\n🔍 **Misinformation Detection** - Analyze claims for false information\n✅ **Truth Verification** - Verify claims with blockchain proofs\n⚡ **Autonomous Transaction** - Make reputation-based decisions\n🌐 **Cross-Chain Reasoning** - Reason across multiple chains\n\n**Social Credit Marketplace Agents:**\n🔎 **Trust Navigator** - Find influencers matching campaigns\n🛡️ **Sybil Detective** - Detect fake accounts and clusters\n🤝 **Contract Negotiator** - Negotiate endorsement deals\n📈 **Campaign Optimizer** - Optimize campaign performance\n✅ **Trust Auditor** - Verify reputation and generate reports\n\nWhat would you like to do?",
     },
   ]);
 
-  const [activeAgent, setActiveAgent] = useState<string>("navigator");
+  const [claim, setClaim] = useState("");
+  const [truthClaim, setTruthClaim] = useState("");
+  const [targetAccount, setTargetAccount] = useState("");
+  const [action, setAction] = useState("");
+  const [crossChainQuery, setCrossChainQuery] = useState("");
   const [influencerQuery, setInfluencerQuery] = useState("");
   const [campaignId, setCampaignId] = useState("");
 
-  // Agent queries
+  // Core Agent queries
+  const detectMisinformationQuery = trpc.agents.detectMisinformation.useQuery(
+    { claim, context: undefined },
+    { enabled: false }
+  );
+
+  const verifyTruthQuery = trpc.agents.verifyTruth.useQuery(
+    { claim: truthClaim },
+    { enabled: false }
+  );
+
+  const autonomousDecisionQuery = trpc.agents.makeAutonomousDecision.useQuery(
+    { action, targetAccount, amount: undefined, context: undefined },
+    { enabled: false }
+  );
+
+  const crossChainReasoningQuery = trpc.agents.crossChainReasoning.useQuery(
+    { query: crossChainQuery, chains: undefined },
+    { enabled: false }
+  );
+
+  // Social Credit Agent queries
   const findInfluencersQuery = trpc.agents.findInfluencers.useQuery(
     { query: influencerQuery, limit: 10 },
     { enabled: false }
@@ -60,14 +99,97 @@ export default function AgentDashboardPage() {
     { enabled: false }
   );
 
+  const verifyReputationQuery = trpc.agents.verifyReputation.useQuery(
+    { did: "did:example:1", includeHistory: false },
+    { enabled: false }
+  );
+
   const handleSendMessage = async (content: string) => {
     const userMessage: Message = { role: "user", content };
     setMessages((prev) => [...prev, userMessage]);
 
-    // Parse intent and route to appropriate agent
     const lowerContent = content.toLowerCase();
 
-    if (lowerContent.includes("find") || lowerContent.includes("influencer") || lowerContent.includes("search")) {
+    // Route to appropriate agent based on keywords
+    if (lowerContent.includes("misinformation") || lowerContent.includes("false") || lowerContent.includes("claim")) {
+      // Misinformation Detection
+      setClaim(content);
+      const result = await detectMisinformationQuery.refetch();
+      
+      if (result.data?.success) {
+        const analysis = result.data.analysis;
+        const response = `🔍 **Misinformation Analysis:**\n\n` +
+          `**Claim:** ${analysis.claim}\n\n` +
+          `**Verdict:** ${analysis.verdict.toUpperCase()}\n` +
+          `**Credibility Score:** ${(analysis.credibility * 100).toFixed(1)}%\n` +
+          `**Confidence:** ${(analysis.confidence * 100).toFixed(1)}%\n\n` +
+          `**Sources Found:** ${analysis.sources.length}\n` +
+          (analysis.sources.length > 0 ? analysis.sources.map((s, i) => 
+            `${i + 1}. Reputation: ${s.reputation.toFixed(0)}, Status: ${s.verification}`
+          ).join("\n") : "") + "\n\n" +
+          `**Reasoning:** ${analysis.reasoning}`;
+        
+        setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+      }
+    } else if (lowerContent.includes("verify truth") || lowerContent.includes("verify claim")) {
+      // Truth Verification
+      setTruthClaim(content.replace(/verify truth|verify claim/gi, "").trim());
+      const result = await verifyTruthQuery.refetch();
+      
+      if (result.data?.success) {
+        const verification = result.data.result;
+        const response = `✅ **Truth Verification:**\n\n` +
+          `**Claim:** ${verification.claim}\n\n` +
+          `**Verified:** ${verification.verified ? "✅ YES" : "❌ NO"}\n` +
+          `**Confidence:** ${(verification.confidence * 100).toFixed(1)}%\n\n` +
+          `**Evidence Sources:** ${verification.evidence.length}\n` +
+          `**Cross-Chain Consensus:** ${(verification.crossChainConsensus.agreement * 100).toFixed(1)}% agreement\n` +
+          (verification.blockchainProof ? `**Blockchain Proof:** Block ${verification.blockchainProof.blockNumber}` : "");
+        
+        setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+      }
+    } else if (lowerContent.includes("autonomous") || lowerContent.includes("transaction") || lowerContent.includes("decision")) {
+      // Autonomous Transaction
+      if (!targetAccount || !action) {
+        setMessages((prev) => [...prev, { 
+          role: "assistant", 
+          content: "Please provide a target account and action. Use the form on the right to enter details." 
+        }]);
+        return;
+      }
+      
+      const result = await autonomousDecisionQuery.refetch();
+      
+      if (result.data?.success) {
+        const decision = result.data.decision;
+        const response = `⚡ **Autonomous Decision:**\n\n` +
+          `**Action:** ${decision.action.toUpperCase()}\n` +
+          `**Confidence:** ${(decision.confidence * 100).toFixed(1)}%\n` +
+          `**Target Reputation:** ${decision.targetReputation.toFixed(0)}\n` +
+          `**Risk Level:** ${decision.riskAssessment.level.toUpperCase()}\n` +
+          `**Estimated Impact:** ${(decision.estimatedImpact * 100).toFixed(1)}%\n\n` +
+          `**Reasoning:** ${decision.reasoning}`;
+        
+        setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+      }
+    } else if (lowerContent.includes("cross-chain") || lowerContent.includes("reasoning") || lowerContent.includes("multiple chains")) {
+      // Cross-Chain Reasoning
+      setCrossChainQuery(content);
+      const result = await crossChainReasoningQuery.refetch();
+      
+      if (result.data?.success) {
+        const reasoning = result.data.result;
+        const response = `🌐 **Cross-Chain Reasoning:**\n\n` +
+          `**Query:** ${reasoning.query}\n\n` +
+          `**Chains Analyzed:** ${reasoning.chainData.length}\n` +
+          `**Consensus Agreement:** ${(reasoning.consensus.agreement * 100).toFixed(1)}%\n` +
+          `**Confidence:** ${(reasoning.consensus.confidence * 100).toFixed(1)}%\n\n` +
+          `**Reasoning:** ${reasoning.reasoning}\n\n` +
+          `**Recommendation:** ${reasoning.recommendation}`;
+        
+        setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+      }
+    } else if (lowerContent.includes("find") || lowerContent.includes("influencer") || lowerContent.includes("search")) {
       // Trust Navigator
       setInfluencerQuery(content);
       const result = await findInfluencersQuery.refetch();
@@ -140,7 +262,7 @@ export default function AgentDashboardPage() {
       // General response
       setMessages((prev) => [...prev, { 
         role: "assistant", 
-        content: "I can help you with:\n\n- Finding influencers: \"Find tech influencers with >0.8 reputation\"\n- Detecting Sybils: \"Detect fake accounts\"\n- Optimizing campaigns: \"Optimize campaign performance\"\n- Verifying reputation: \"Verify reputation for did:example:1\"\n\nWhat would you like to do?" 
+        content: "I can help you with:\n\n**Core Agents:**\n- Misinformation detection: \"Analyze this claim for misinformation\"\n- Truth verification: \"Verify truth of this claim\"\n- Autonomous decisions: Use the form to enter transaction details\n- Cross-chain reasoning: \"Query reputation across chains\"\n\n**Social Credit Agents:**\n- Finding influencers: \"Find tech influencers with >0.8 reputation\"\n- Detecting Sybils: \"Detect fake accounts\"\n- Optimizing campaigns: \"Optimize campaign performance\"\n- Verifying reputation: \"Verify reputation for did:example:1\"\n\nWhat would you like to do?" 
       }]);
     }
   };
@@ -151,20 +273,20 @@ export default function AgentDashboardPage() {
         <div>
           <h1 className="text-3xl font-bold">AI Agent Dashboard</h1>
           <p className="text-muted-foreground mt-2">
-            Interact with specialized AI agents for the Social Credit Marketplace
+            Interact with 9 specialized AI agents for trust, verification, and reputation management
           </p>
         </div>
         <Badge variant="outline" className="text-sm">
           <Sparkles className="w-4 h-4 mr-2" />
-          Agent Layer Active
+          9 Agents Active
         </Badge>
       </div>
 
       <Tabs defaultValue="chat" className="space-y-4">
-        <TabsList>
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="chat">Conversational Interface</TabsTrigger>
-          <TabsTrigger value="agents">Agent Tools</TabsTrigger>
-          <TabsTrigger value="dashboard">Trust Dashboard</TabsTrigger>
+          <TabsTrigger value="agents">All Agents</TabsTrigger>
+          <TabsTrigger value="demo">Interactive Demos</TabsTrigger>
         </TabsList>
 
         <TabsContent value="chat" className="space-y-4">
@@ -173,12 +295,13 @@ export default function AgentDashboardPage() {
               <AIChatBox
                 messages={messages}
                 onSendMessage={handleSendMessage}
-                placeholder="Ask me to find influencers, detect Sybils, optimize campaigns..."
+                placeholder="Try: 'Analyze this claim for misinformation' or 'Find tech influencers'..."
                 suggestedPrompts={[
-                  "Find tech influencers with >0.8 reputation for gadget reviews",
+                  "Analyze this claim for misinformation: 'Bitcoin will reach $1M'",
+                  "Verify truth: 'The Earth is round'",
+                  "Find tech influencers with >0.8 reputation",
                   "Detect Sybil clusters in the network",
-                  "Optimize campaign performance",
-                  "Verify reputation for did:example:1",
+                  "Query reputation across multiple chains",
                 ]}
                 height="700px"
               />
@@ -193,14 +316,6 @@ export default function AgentDashboardPage() {
                   <Button
                     variant="outline"
                     className="w-full justify-start"
-                    onClick={() => handleSendMessage("Find gaming influencers for product launch")}
-                  >
-                    <Search className="w-4 h-4 mr-2" />
-                    Find Influencers
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start"
                     onClick={() => handleSendMessage("Detect Sybil accounts")}
                   >
                     <Shield className="w-4 h-4 mr-2" />
@@ -209,35 +324,27 @@ export default function AgentDashboardPage() {
                   <Button
                     variant="outline"
                     className="w-full justify-start"
-                    onClick={() => handleSendMessage("Show campaign performance")}
+                    onClick={() => handleSendMessage("Find gaming influencers for product launch")}
                   >
-                    <TrendingUp className="w-4 h-4 mr-2" />
-                    Optimize Campaign
+                    <Search className="w-4 h-4 mr-2" />
+                    Find Influencers
                   </Button>
                   <Button
                     variant="outline"
                     className="w-full justify-start"
-                    onClick={() => handleSendMessage("Generate transparency report")}
+                    onClick={() => handleSendMessage("Analyze this claim for misinformation")}
+                  >
+                    <Bug className="w-4 h-4 mr-2" />
+                    Check Misinformation
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start"
+                    onClick={() => handleSendMessage("Verify truth of this claim")}
                   >
                     <CheckCircle2 className="w-4 h-4 mr-2" />
-                    Audit Report
+                    Verify Truth
                   </Button>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Campaign ID</CardTitle>
-                  <CardDescription>Enter campaign ID for optimization</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <input
-                    type="text"
-                    value={campaignId}
-                    onChange={(e) => setCampaignId(e.target.value)}
-                    placeholder="campaign-123"
-                    className="w-full px-3 py-2 border rounded-md"
-                  />
                 </CardContent>
               </Card>
             </div>
@@ -245,72 +352,228 @@ export default function AgentDashboardPage() {
         </TabsContent>
 
         <TabsContent value="agents" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <AgentCard
-              icon={Search}
-              title="Trust Navigator"
-              description="Find influencers matching campaign requirements"
-              color="blue"
-              features={[
-                "Natural language queries",
-                "Real-time reputation matching",
-                "ROI estimation",
-                "Multi-platform support",
-              ]}
-            />
-            <AgentCard
-              icon={Shield}
-              title="Sybil Detective"
-              description="Automated fake account detection"
-              color="red"
-              features={[
-                "Cluster analysis",
-                "Behavioral anomaly detection",
-                "Risk scoring",
-                "Visual graph representation",
-              ]}
-            />
-            <AgentCard
-              icon={Handshake}
-              title="Contract Negotiator"
-              description="Autonomous endorsement deal-making"
-              color="green"
-              features={[
-                "AI-powered negotiation",
-                "Reputation-based pricing",
-                "x402 payment automation",
-                "Performance bonuses",
-              ]}
-            />
-            <AgentCard
-              icon={TrendingUp}
-              title="Campaign Optimizer"
-              description="Endorsement ROI maximization"
-              color="purple"
-              features={[
-                "Predictive analytics",
-                "Real-time tracking",
-                "A/B testing",
-                "Payment optimization",
-              ]}
-            />
-            <AgentCard
-              icon={CheckCircle2}
-              title="Trust Auditor"
-              description="Continuous reputation verification"
-              color="orange"
-              features={[
-                "Real-time score updates",
-                "Fraud detection",
-                "Transparency reports",
-                "DKG audit trails",
-              ]}
-            />
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Core AI Agents</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <AgentCard
+                icon={Bug}
+                title="Misinformation Detection"
+                description="Detect and analyze false claims using DKG knowledge"
+                color="red"
+                features={[
+                  "DKG-powered analysis",
+                  "Credibility scoring",
+                  "Cross-chain verification",
+                  "Source reputation tracking",
+                ]}
+                category="core"
+              />
+              <AgentCard
+                icon={Scale}
+                title="Truth Verification"
+                description="Verify claims with blockchain proofs and multi-source evidence"
+                color="green"
+                features={[
+                  "Multi-source evidence",
+                  "Blockchain proof generation",
+                  "Cross-chain consensus",
+                  "Transparency tracking",
+                ]}
+                category="core"
+              />
+              <AgentCard
+                icon={Zap}
+                title="Autonomous Transaction"
+                description="Make reputation-based transaction decisions autonomously"
+                color="yellow"
+                features={[
+                  "Reputation-based decisions",
+                  "Risk assessment",
+                  "Cross-chain impact analysis",
+                  "Transparent reasoning",
+                ]}
+                category="core"
+              />
+              <AgentCard
+                icon={Network}
+                title="Cross-Chain Reasoning"
+                description="Reason across multiple Polkadot chains using XCM"
+                color="purple"
+                features={[
+                  "Multi-chain queries",
+                  "XCM integration",
+                  "Consensus calculation",
+                  "Shared security",
+                ]}
+                category="core"
+              />
+            </div>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold mb-4">Social Credit Marketplace Agents</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <AgentCard
+                icon={Search}
+                title="Trust Navigator"
+                description="Find influencers matching campaign requirements"
+                color="blue"
+                features={[
+                  "Natural language queries",
+                  "Real-time reputation matching",
+                  "ROI estimation",
+                  "Multi-platform support",
+                ]}
+                category="social"
+              />
+              <AgentCard
+                icon={Shield}
+                title="Sybil Detective"
+                description="Automated fake account detection"
+                color="red"
+                features={[
+                  "Cluster analysis",
+                  "Behavioral anomaly detection",
+                  "Risk scoring",
+                  "Visual graph representation",
+                ]}
+                category="social"
+              />
+              <AgentCard
+                icon={Handshake}
+                title="Contract Negotiator"
+                description="Autonomous endorsement deal-making"
+                color="green"
+                features={[
+                  "AI-powered negotiation",
+                  "Reputation-based pricing",
+                  "x402 payment automation",
+                  "Performance bonuses",
+                ]}
+                category="social"
+              />
+              <AgentCard
+                icon={TrendingUp}
+                title="Campaign Optimizer"
+                description="Endorsement ROI maximization"
+                color="purple"
+                features={[
+                  "Predictive analytics",
+                  "Real-time tracking",
+                  "A/B testing",
+                  "Payment optimization",
+                ]}
+                category="social"
+              />
+              <AgentCard
+                icon={CheckCircle2}
+                title="Trust Auditor"
+                description="Continuous reputation verification"
+                color="orange"
+                features={[
+                  "Real-time score updates",
+                  "Fraud detection",
+                  "Transparency reports",
+                  "DKG audit trails",
+                ]}
+                category="social"
+              />
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="dashboard" className="space-y-4">
-          <TrustDashboard />
+        <TabsContent value="demo" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <InteractiveDemoCard
+              title="Misinformation Detection"
+              icon={Bug}
+              description="Analyze claims for potential misinformation"
+              inputPlaceholder="Enter a claim to analyze..."
+              inputValue={claim}
+              onInputChange={setClaim}
+              onDemoClick={async () => {
+                if (!claim) return;
+                const result = await detectMisinformationQuery.refetch();
+                if (result.data?.success) {
+                  // Handle result display
+                }
+              }}
+              demoQuery={detectMisinformationQuery}
+              renderResult={(data) => data?.analysis && (
+                <div className="space-y-2 text-sm">
+                  <div><strong>Verdict:</strong> {data.analysis.verdict.toUpperCase()}</div>
+                  <div><strong>Credibility:</strong> {(data.analysis.credibility * 100).toFixed(1)}%</div>
+                  <div><strong>Sources:</strong> {data.analysis.sources.length}</div>
+                </div>
+              )}
+            />
+
+            <InteractiveDemoCard
+              title="Truth Verification"
+              icon={Scale}
+              description="Verify claims with blockchain proofs"
+              inputPlaceholder="Enter a claim to verify..."
+              inputValue={truthClaim}
+              onInputChange={setTruthClaim}
+              onDemoClick={async () => {
+                if (!truthClaim) return;
+                const result = await verifyTruthQuery.refetch();
+              }}
+              demoQuery={verifyTruthQuery}
+              renderResult={(data) => data?.result && (
+                <div className="space-y-2 text-sm">
+                  <div><strong>Verified:</strong> {data.result.verified ? "✅ Yes" : "❌ No"}</div>
+                  <div><strong>Confidence:</strong> {(data.result.confidence * 100).toFixed(1)}%</div>
+                  <div><strong>Evidence:</strong> {data.result.evidence.length} sources</div>
+                </div>
+              )}
+            />
+
+            <InteractiveDemoCard
+              title="Autonomous Transaction"
+              icon={Zap}
+              description="Make reputation-based transaction decisions"
+              inputPlaceholder="Target account address..."
+              inputValue={targetAccount}
+              onInputChange={setTargetAccount}
+              secondaryInputPlaceholder="Action description..."
+              secondaryInputValue={action}
+              onSecondaryInputChange={setAction}
+              onDemoClick={async () => {
+                if (!targetAccount || !action) return;
+                const result = await autonomousDecisionQuery.refetch();
+              }}
+              demoQuery={autonomousDecisionQuery}
+              renderResult={(data) => data?.decision && (
+                <div className="space-y-2 text-sm">
+                  <div><strong>Action:</strong> {data.decision.action.toUpperCase()}</div>
+                  <div><strong>Confidence:</strong> {(data.decision.confidence * 100).toFixed(1)}%</div>
+                  <div><strong>Risk:</strong> {data.decision.riskAssessment.level}</div>
+                </div>
+              )}
+            />
+
+            <InteractiveDemoCard
+              title="Cross-Chain Reasoning"
+              icon={Network}
+              description="Reason across multiple Polkadot chains"
+              inputPlaceholder="Enter query for cross-chain reasoning..."
+              inputValue={crossChainQuery}
+              onInputChange={setCrossChainQuery}
+              onDemoClick={async () => {
+                if (!crossChainQuery) return;
+                const result = await crossChainReasoningQuery.refetch();
+              }}
+              demoQuery={crossChainReasoningQuery}
+              renderResult={(data) => data?.result && (
+                <div className="space-y-2 text-sm">
+                  <div><strong>Consensus:</strong> {(data.result.consensus.agreement * 100).toFixed(1)}%</div>
+                  <div><strong>Confidence:</strong> {(data.result.consensus.confidence * 100).toFixed(1)}%</div>
+                  <div><strong>Chains:</strong> {data.result.chainData.length}</div>
+                </div>
+              )}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>
@@ -323,12 +586,14 @@ function AgentCard({
   description,
   color,
   features,
+  category,
 }: {
   icon: React.ElementType;
   title: string;
   description: string;
   color: string;
   features: string[];
+  category?: "core" | "social";
 }) {
   const colorClasses: Record<string, string> = {
     blue: "border-blue-500 bg-blue-50 dark:bg-blue-950",
@@ -336,22 +601,23 @@ function AgentCard({
     green: "border-green-500 bg-green-50 dark:bg-green-950",
     purple: "border-purple-500 bg-purple-50 dark:bg-purple-950",
     orange: "border-orange-500 bg-orange-50 dark:bg-orange-950",
+    yellow: "border-yellow-500 bg-yellow-50 dark:bg-yellow-950",
   };
 
   return (
-    <Card className={colorClasses[color] || ""}>
+    <Card className={`${colorClasses[color] || ""} hover:shadow-lg transition-shadow`}>
       <CardHeader>
         <div className="flex items-center gap-2">
           <Icon className="w-5 h-5" />
-          <CardTitle>{title}</CardTitle>
+          <CardTitle className="text-base">{title}</CardTitle>
         </div>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription className="text-xs">{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <ul className="space-y-1 text-sm">
+        <ul className="space-y-1 text-xs">
           {features.map((feature, i) => (
             <li key={i} className="flex items-start gap-2">
-              <span className="text-primary">•</span>
+              <span className="text-primary mt-1">•</span>
               <span>{feature}</span>
             </li>
           ))}
@@ -361,137 +627,78 @@ function AgentCard({
   );
 }
 
-function TrustDashboard() {
-  const [selectedDid, setSelectedDid] = useState("did:example:1");
-  
-  const verifyReputationQuery = trpc.agents.verifyReputation.useQuery(
-    { did: selectedDid, includeHistory: false },
-    { enabled: !!selectedDid }
-  );
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Reputation Verification</CardTitle>
-          <CardDescription>Real-time reputation verification</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">DID to Verify</label>
-              <input
-                type="text"
-                value={selectedDid}
-                onChange={(e) => setSelectedDid(e.target.value)}
-                className="w-full mt-1 px-3 py-2 border rounded-md"
-                placeholder="did:example:1"
-              />
-            </div>
-            
-            {verifyReputationQuery.data?.success && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span>Current Reputation</span>
-                  <Badge variant="outline">
-                    {verifyReputationQuery.data.verification.currentReputation.toFixed(0)}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span>Verified</span>
-                  {verifyReputationQuery.data.verification.verified ? (
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <AlertTriangle className="w-5 h-5 text-yellow-500" />
-                  )}
-                </div>
-                <div className="mt-4">
-                  <h4 className="text-sm font-medium mb-2">Audit Trail</h4>
-                  <ScrollArea className="h-32">
-                    <div className="space-y-1 text-xs">
-                      {verifyReputationQuery.data.verification.auditTrail.map((entry, i) => (
-                        <div key={i} className="flex items-center justify-between p-2 bg-muted rounded">
-                          <span>{entry.action}</span>
-                          {entry.verified ? (
-                            <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          ) : (
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Live Metrics</CardTitle>
-          <CardDescription>Real-time marketplace metrics</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <MetricItem
-              label="Active Campaigns"
-              value="12"
-              icon={TrendingUp}
-              trend="+3"
-            />
-            <MetricItem
-              label="Verified Influencers"
-              value="1,234"
-              icon={CheckCircle2}
-              trend="+45"
-            />
-            <MetricItem
-              label="Sybil Detections"
-              value="23"
-              icon={Shield}
-              trend="-5"
-            />
-            <MetricItem
-              label="x402 Payments"
-              value="567"
-              icon={DollarSign}
-              trend="+89"
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function MetricItem({
-  label,
-  value,
+function InteractiveDemoCard({
+  title,
   icon: Icon,
-  trend,
+  description,
+  inputPlaceholder,
+  inputValue,
+  onInputChange,
+  secondaryInputPlaceholder,
+  secondaryInputValue,
+  onSecondaryInputChange,
+  onDemoClick,
+  demoQuery,
+  renderResult,
 }: {
-  label: string;
-  value: string;
+  title: string;
   icon: React.ElementType;
-  trend: string;
+  description: string;
+  inputPlaceholder: string;
+  inputValue: string;
+  onInputChange: (value: string) => void;
+  secondaryInputPlaceholder?: string;
+  secondaryInputValue?: string;
+  onSecondaryInputChange?: (value: string) => void;
+  onDemoClick: () => void;
+  demoQuery: any;
+  renderResult: (data: any) => React.ReactNode;
 }) {
-  const isPositive = trend.startsWith("+");
-  
   return (
-    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-      <div className="flex items-center gap-3">
-        <Icon className="w-5 h-5 text-muted-foreground" />
-        <div>
-          <div className="text-sm font-medium">{label}</div>
-          <div className="text-2xl font-bold">{value}</div>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Icon className="w-5 h-5" />
+          <CardTitle>{title}</CardTitle>
         </div>
-      </div>
-      <Badge variant={isPositive ? "default" : "secondary"}>
-        {trend}
-      </Badge>
-    </div>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Input
+            placeholder={inputPlaceholder}
+            value={inputValue}
+            onChange={(e) => onInputChange(e.target.value)}
+          />
+          {secondaryInputPlaceholder && onSecondaryInputChange && (
+            <Input
+              placeholder={secondaryInputPlaceholder}
+              value={secondaryInputValue || ""}
+              onChange={(e) => onSecondaryInputChange(e.target.value)}
+            />
+          )}
+          <Button
+            onClick={onDemoClick}
+            disabled={demoQuery.isLoading || !inputValue || (secondaryInputPlaceholder && !secondaryInputValue)}
+            className="w-full"
+          >
+            {demoQuery.isLoading ? "Processing..." : "Run Demo"}
+          </Button>
+        </div>
+
+        {demoQuery.data?.success && (
+          <div className="p-4 bg-muted rounded-lg">
+            <h4 className="font-semibold mb-2">Result:</h4>
+            {renderResult(demoQuery.data)}
+          </div>
+        )}
+
+        {demoQuery.error && (
+          <div className="p-4 bg-red-50 dark:bg-red-950 rounded-lg text-sm text-red-600 dark:text-red-400">
+            Error: {demoQuery.error.message}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
-

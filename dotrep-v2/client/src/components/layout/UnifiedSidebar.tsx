@@ -31,32 +31,93 @@ import {
   BadgeCheck,
   Activity,
   Home,
+  Users,
+  BarChart3,
+  Trophy,
+  Globe,
+  Link2,
+  User,
+  Image,
+  Calculator,
+  Database,
+  Cloud,
+  CloudUpload,
+  Layers,
+  FileText,
+  Network,
+  Settings,
+  Wallet,
+  Zap,
+  Target,
+  Brain,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { Link } from "wouter";
 
 const menuGroups = [
   {
-    title: "Public",
+    title: "Main",
     items: [
       { icon: Home, label: "Home", path: "/" },
+      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
       { icon: Book, label: "Docs", path: "/docs" },
+      { icon: Brain, label: "AI Agents", path: "/agents" },
     ],
   },
   {
-    title: "User & Reputation",
+    title: "Reputation",
     items: [
       { icon: TrendingUp, label: "Reputation", path: "/reputation" },
-      { icon: Github, label: "Connect GitHub", path: "/connect" },
+      { icon: Calculator, label: "Reputation Calculator", path: "/reputation-calculator" },
+      { icon: Trophy, label: "Leaderboard", path: "/leaderboard" },
+      { icon: Users, label: "Multi-Chain Reputation", path: "/multi-chain" },
+      { icon: Target, label: "Context-Aware Reputation", path: "/context-aware" },
     ],
   },
   {
-    title: "Developer",
+    title: "Contributions",
     items: [
-      { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
+      { icon: Github, label: "Connect GitHub", path: "/connect" },
       { icon: SearchCheck, label: "Proof Explorer", path: "/proof-explorer" },
-      { icon: BadgeCheck, label: "SBT Mint", path: "/sbt-mint" },
+      { icon: Database, label: "Anchor Explorer", path: "/anchors" },
+      { icon: CloudUpload, label: "Cloud Verification", path: "/cloud-verification" },
+    ],
+  },
+  {
+    title: "Polkadot",
+    items: [
+      { icon: Network, label: "Chain Info", path: "/chain-info" },
+      { icon: Globe, label: "XCM Gateway", path: "/xcm-gateway" },
+      { icon: FileText, label: "Governance", path: "/governance" },
+      { icon: User, label: "Identity", path: "/identity" },
       { icon: Activity, label: "Telemetry", path: "/telemetry" },
+    ],
+  },
+  {
+    title: "NFTs & Achievements",
+    items: [
+      { icon: Image, label: "NFT Gallery", path: "/nft-gallery" },
+      { icon: BadgeCheck, label: "SBT Mint", path: "/sbt-mint" },
+    ],
+  },
+  {
+    title: "Analytics",
+    items: [
+      { icon: BarChart3, label: "Analytics", path: "/analytics" },
+      { icon: Zap, label: "Metrics", path: "/metrics" },
+    ],
+  },
+  {
+    title: "Cloud & Storage",
+    items: [
+      { icon: Cloud, label: "Cloud Storage", path: "/cloud-storage" },
+      { icon: Layers, label: "Trust Layer", path: "/trust-layer" },
+    ],
+  },
+  {
+    title: "Community",
+    items: [
+      { icon: FileText, label: "Community Notes", path: "/community-notes" },
     ],
   },
 ];
@@ -159,12 +220,36 @@ export function UnifiedSidebar({ children }: { children: React.ReactNode }) {
         </Sidebar>
 
         <div className="flex-1 flex flex-col">
-          {isMobile && (
-            <div className="flex border-b border-gray-200/60 h-14 items-center justify-between bg-white/95 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
-              <SidebarTrigger className="h-9 w-9 rounded-lg bg-white border border-gray-200" />
+          {/* Top Header Bar */}
+          <header className="sticky top-0 z-40 border-b border-gray-200/60 bg-white/95 dark:bg-gray-900/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
+            <div className="flex h-14 items-center justify-between px-4 lg:px-6">
+              <div className="flex items-center gap-4">
+                <SidebarTrigger className="h-9 w-9 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" />
+                <div className="hidden md:flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-[#6C3CF0]" />
+                  <span className="font-semibold text-gray-900 dark:text-white">DotRep dApp</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                {/* Wallet Connection Status */}
+                {user && (
+                  <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800">
+                    <Wallet className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                      {user.name || "Connected"}
+                    </span>
+                  </div>
+                )}
+                {/* Settings Link */}
+                <Link href="/dashboard">
+                  <a className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                    <Settings className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                  </a>
+                </Link>
+              </div>
             </div>
-          )}
-          <main className="flex-1">{children}</main>
+          </header>
+          <main className="flex-1 overflow-auto">{children}</main>
         </div>
       </div>
     </SidebarProvider>

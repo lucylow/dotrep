@@ -16,10 +16,17 @@ import {
   Activity
 } from "lucide-react";
 import { UnifiedSidebar } from "@/components/layout/UnifiedSidebar";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { useDotRepWallet } from "@/_core/hooks/useDotRepWallet";
 import { toast } from "sonner";
+import { 
+  mockCrossChainMessages,
+  mockChainConnections,
+  mockCrossChainReputations,
+  type CrossChainMessage,
+  type ChainConnection
+} from "@/data/enhancedMockData";
 
 interface ChainInfo {
   id: string;
@@ -53,6 +60,10 @@ export default function XcmGatewayPage() {
   const [verifyChain, setVerifyChain] = useState("");
   const [verifyAccount, setVerifyAccount] = useState("");
   const [verifyTxHash, setVerifyTxHash] = useState("");
+  
+  const [crossChainMessages] = useState<CrossChainMessage[]>(mockCrossChainMessages);
+  const [chainConnections] = useState<ChainConnection[]>(mockChainConnections);
+  const [selectedMessage, setSelectedMessage] = useState<string | null>(null);
 
   const initiateQueryMutation = trpc.polkadot.xcm.initiateQuery.useMutation({
     onSuccess: () => {
@@ -441,6 +452,89 @@ export default function XcmGatewayPage() {
 
             <TabsContent value="history">
               <div className="space-y-4">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold mb-2">Cross-Chain Message Flow</h3>
+                  <p className="text-sm text-[#4F4F4F]">
+                    Visualize cross-chain data flow and message routing
+                  </p>
+                </div>
+                
+                {crossChainMessages.map((message) => (
+                  <Card 
+                    key={message.id}
+                    className={`p-6 cursor-pointer transition-all hover:shadow-lg ${
+                      selectedMessage === message.id ? "ring-2 ring-[#6C3CF0]" : ""
+                    }`}
+                    onClick={() => setSelectedMessage(
+                      selectedMessage === message.id ? null : message.id
+                    )}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-[#131313] mb-1">
+                          {message.sourceChain} → {message.targetChain}
+                        </h3>
+                        <p className="text-sm text-[#4F4F4F] capitalize">
+                          {message.messageType} message
+                        </p>
+                      </div>
+                      {getStatusBadge(message.status)}
+                    </div>
+
+                    {message.hops && message.hops.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-xs text-[#4F4F4F] mb-2">Message Route:</p>
+                        <div className="flex items-center gap-2">
+                          {message.hops.map((hop, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">
+                                {hop}
+                              </Badge>
+                              {i < message.hops!.length - 1 && (
+                                <ArrowRight className="w-4 h-4 text-[#4F4F4F]" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {message.result && (
+                      <div className="grid grid-cols-3 gap-4 mt-4 p-4 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="text-xs text-[#4F4F4F] mb-1">Reputation Score</p>
+                          <p className="text-xl font-bold text-[#131313]">
+                            {message.result.reputationScore?.toLocaleString()}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-[#4F4F4F] mb-1">Percentile</p>
+                          <p className="text-xl font-bold text-[#131313]">
+                            {message.result.percentile}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-[#4F4F4F] mb-1">Contributions</p>
+                          <p className="text-xl font-bold text-[#131313]">
+                            {message.result.verifiedContributions}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-between text-sm text-[#4F4F4F]">
+                      <span>
+                        Initiated: {new Date(message.timestamp).toLocaleString()}
+                      </span>
+                      {message.deliveredAt && (
+                        <span>
+                          Delivered: {new Date(message.deliveredAt).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+                
                 {recentQueries.map((query) => (
                   <Card key={query.id} className="p-6">
                     <div className="flex items-start justify-between mb-4">

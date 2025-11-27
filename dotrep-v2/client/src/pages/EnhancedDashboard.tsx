@@ -18,7 +18,7 @@ import { QuickStats } from '@/components/dashboard/QuickStats';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { NetworkMap } from '@/components/dashboard/NetworkMap';
 import { ContributionList } from '@/components/contributions/ContributionList';
-import { UnifiedSidebar } from '@/components/layout/UnifiedSidebar';
+// UnifiedSidebar is now provided by AppLayout at the App level
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -95,20 +95,18 @@ const EnhancedDashboard: React.FC = () => {
 
   if (loading || contributorLoading) {
     return (
-      <UnifiedSidebar>
-        <div className="p-6 flex items-center justify-center min-h-screen">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center"
-          >
-            <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
-              <Zap className="h-8 w-8 animate-pulse text-white" />
-            </div>
-            <div className="text-xl text-gray-600 dark:text-gray-400">Loading Dashboard...</div>
-          </motion.div>
-        </div>
-      </UnifiedSidebar>
+      <div className="p-6 flex items-center justify-center min-h-screen">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center"
+        >
+          <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600">
+            <Zap className="h-8 w-8 animate-pulse text-white" />
+          </div>
+          <div className="text-xl text-gray-600 dark:text-gray-400">Loading Dashboard...</div>
+        </motion.div>
+      </div>
     );
   }
 
@@ -118,7 +116,6 @@ const EnhancedDashboard: React.FC = () => {
   }
 
   return (
-    <UnifiedSidebar>
       <motion.div
         className="p-6 space-y-6"
         variants={containerVariants}
@@ -337,7 +334,6 @@ const EnhancedDashboard: React.FC = () => {
           </AnimatePresence>
         </div>
       </motion.div>
-    </UnifiedSidebar>
   );
 };
 

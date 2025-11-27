@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, ReactNode } from "react";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { EnhancedThemeProvider } from "./contexts/EnhancedThemeContext";
 import { PageLoader } from "./components/ui/PageLoader";
+import { AppLayout } from "./components/layout/AppLayout";
 
 // Lazy load all pages for code splitting
 const LandingPageLovable = lazy(() => import("./pages/LandingPageLovable"));
@@ -34,7 +35,17 @@ const ReputationCalculatorPage = lazy(() => import("./pages/ReputationCalculator
 const MetricsPage = lazy(() => import("./pages/MetricsPage"));
 const CommunityNotesPage = lazy(() => import("./pages/CommunityNotesPage"));
 const TrustLayerPage = lazy(() => import("./pages/TrustLayerPage"));
+const AgentDashboardPage = lazy(() => import("./pages/AgentDashboardPage"));
+const DKGInteractionPage = lazy(() => import("./pages/DKGInteractionPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+
+// Helper component to wrap pages with layout (except landing page)
+function PageWrapper({ children, useLayout = true }: { children: ReactNode; useLayout?: boolean }) {
+  if (useLayout) {
+    return <AppLayout>{children}</AppLayout>;
+  }
+  return <>{children}</>;
+}
 
 function Router() {
   // Complete page structure with Polkadot SDK integration:
@@ -58,145 +69,218 @@ function Router() {
   // 18. Multi-Chain Reputation (/multi-chain) - Cross-chain reputation
   return (
     <Switch>
+      {/* Landing page - no layout */}
       <Route path={"/"}>
         <Suspense fallback={<PageLoader />}>
-          <LandingPageLovable />
+          <PageWrapper useLayout={false}>
+            <LandingPageLovable />
+          </PageWrapper>
         </Suspense>
       </Route>
+      
+      {/* All other pages - with layout */}
       <Route path="/docs">
         <Suspense fallback={<PageLoader />}>
-          <DocsPage />
+          <PageWrapper>
+            <DocsPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/reputation">
         <Suspense fallback={<PageLoader />}>
-          <ReputationPage />
+          <PageWrapper>
+            <ReputationPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/dashboard">
         <Suspense fallback={<PageLoader />}>
-          <EnhancedDashboard />
+          <PageWrapper>
+            <EnhancedDashboard />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/dashboard-old">
         <Suspense fallback={<PageLoader />}>
-          <DashboardImproved />
+          <PageWrapper>
+            <DashboardImproved />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/connect">
         <Suspense fallback={<PageLoader />}>
-          <ConnectPage />
+          <PageWrapper>
+            <ConnectPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/proof-explorer">
         <Suspense fallback={<PageLoader />}>
-          <ProofExplorerPage />
+          <PageWrapper>
+            <ProofExplorerPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/sbt-mint">
         <Suspense fallback={<PageLoader />}>
-          <SbtMintPage />
+          <PageWrapper>
+            <SbtMintPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/telemetry">
         <Suspense fallback={<PageLoader />}>
-          <TelemetryPage />
+          <PageWrapper>
+            <TelemetryPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/governance">
         <Suspense fallback={<PageLoader />}>
-          <GovernancePage />
+          <PageWrapper>
+            <GovernancePage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/xcm-gateway">
         <Suspense fallback={<PageLoader />}>
-          <XcmGatewayPage />
+          <PageWrapper>
+            <XcmGatewayPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/identity">
         <Suspense fallback={<PageLoader />}>
-          <IdentityPage />
+          <PageWrapper>
+            <IdentityPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/nft-gallery">
         <Suspense fallback={<PageLoader />}>
-          <NftGalleryPage />
+          <PageWrapper>
+            <NftGalleryPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/analytics">
         <Suspense fallback={<PageLoader />}>
-          <AnalyticsPage />
+          <PageWrapper>
+            <AnalyticsPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/leaderboard">
         <Suspense fallback={<PageLoader />}>
-          <LeaderboardPage />
+          <PageWrapper>
+            <LeaderboardPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/contributor/:username">
         <Suspense fallback={<PageLoader />}>
-          <ContributorProfilePage />
+          <PageWrapper>
+            <ContributorProfilePage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/anchors">
         <Suspense fallback={<PageLoader />}>
-          <AnchorExplorerPage />
+          <PageWrapper>
+            <AnchorExplorerPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/chain-info">
         <Suspense fallback={<PageLoader />}>
-          <ChainInfoPage />
+          <PageWrapper>
+            <ChainInfoPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/multi-chain">
         <Suspense fallback={<PageLoader />}>
-          <MultiChainReputationPage />
+          <PageWrapper>
+            <MultiChainReputationPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/context-aware">
         <Suspense fallback={<PageLoader />}>
-          <ContextAwareReputationPage />
+          <PageWrapper>
+            <ContextAwareReputationPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/cloud-verification">
         <Suspense fallback={<PageLoader />}>
-          <CloudVerificationPage />
+          <PageWrapper>
+            <CloudVerificationPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/cloud-storage">
         <Suspense fallback={<PageLoader />}>
-          <CloudStoragePage />
+          <PageWrapper>
+            <CloudStoragePage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/reputation-calculator">
         <Suspense fallback={<PageLoader />}>
-          <ReputationCalculatorPage />
+          <PageWrapper>
+            <ReputationCalculatorPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/metrics">
         <Suspense fallback={<PageLoader />}>
-          <MetricsPage />
+          <PageWrapper>
+            <MetricsPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/community-notes">
         <Suspense fallback={<PageLoader />}>
-          <CommunityNotesPage />
+          <PageWrapper>
+            <CommunityNotesPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path="/trust-layer">
         <Suspense fallback={<PageLoader />}>
-          <TrustLayerPage />
+          <PageWrapper>
+            <TrustLayerPage />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/agents">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <AgentDashboardPage />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/dkg-interaction">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <DKGInteractionPage />
+          </PageWrapper>
         </Suspense>
       </Route>
       <Route path={"/404"}>
         <Suspense fallback={<PageLoader />}>
-          <NotFound />
+          <PageWrapper>
+            <NotFound />
+          </PageWrapper>
         </Suspense>
       </Route>
       {/* Final fallback route */}
       <Route>
         <Suspense fallback={<PageLoader />}>
-          <NotFound />
+          <PageWrapper>
+            <NotFound />
+          </PageWrapper>
         </Suspense>
       </Route>
     </Switch>

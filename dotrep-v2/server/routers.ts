@@ -26,6 +26,7 @@ const contributorIdWithLimitSchema = z.object({
 });
 
 import { createSocialCreditAgents } from './_core/socialCreditAgents';
+import { createAIAgents } from './_core/aiAgents';
 import { DKGClient } from '../dkg-integration/dkg-client';
 import { getPolkadotApi } from './_core/polkadotApi';
 
@@ -270,6 +271,110 @@ export const appRouter = router({
           return { success: true, report };
         } catch (error) {
           logError(error, { operation: 'generateTransparencyReport', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Detect misinformation in a claim
+     */
+    detectMisinformation: publicProcedure
+      .input(z.object({
+        claim: z.string().min(1),
+        context: z.string().optional(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createAIAgents(dkgClient, polkadotApi);
+          
+          const analysis = await agents.misinformationDetection.analyzeClaim(
+            input.claim,
+            input.context
+          );
+          
+          return { success: true, analysis };
+        } catch (error) {
+          logError(error, { operation: 'detectMisinformation', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Verify truth of a claim
+     */
+    verifyTruth: publicProcedure
+      .input(z.object({
+        claim: z.string().min(1),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createAIAgents(dkgClient, polkadotApi);
+          
+          const result = await agents.truthVerification.verifyClaim(input.claim);
+          
+          return { success: true, result };
+        } catch (error) {
+          logError(error, { operation: 'verifyTruth', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Make autonomous transaction decision
+     */
+    makeAutonomousDecision: publicProcedure
+      .input(z.object({
+        action: z.string(),
+        targetAccount: z.string(),
+        amount: z.number().optional(),
+        context: z.record(z.any()).optional(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const polkadotApi = getPolkadotApi();
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const agents = createAIAgents(dkgClient, polkadotApi);
+          
+          const decision = await agents.autonomousTransaction.makeDecision(
+            input.action,
+            input.targetAccount,
+            input.amount,
+            input.context
+          );
+          
+          return { success: true, decision };
+        } catch (error) {
+          logError(error, { operation: 'makeAutonomousDecision', input });
+          throw toTRPCError(error);
+        }
+      }),
+
+    /**
+     * Perform cross-chain reasoning
+     */
+    crossChainReasoning: publicProcedure
+      .input(z.object({
+        query: z.string().min(1),
+        chains: z.array(z.string()).optional(),
+      }))
+      .query(async ({ input }) => {
+        try {
+          const dkgClient = new DKGClient({ useMockMode: false, fallbackToMock: true });
+          const polkadotApi = getPolkadotApi();
+          const agents = createAIAgents(dkgClient, polkadotApi);
+          
+          const result = await agents.crossChainReasoning.reason(
+            input.query,
+            input.chains || ['polkadot', 'kusama']
+          );
+          
+          return { success: true, result };
+        } catch (error) {
+          logError(error, { operation: 'crossChainReasoning', input });
           throw toTRPCError(error);
         }
       }),
