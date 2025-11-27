@@ -38,9 +38,21 @@ import {
   Scale,
   Zap,
   Network,
-  Brain
+  Brain,
+  Clock,
+  Settings,
+  History
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { HumanApprovalDialog, type PendingAction, type AgentActionType } from "@/components/HumanApprovalDialog";
+import { PendingActionsQueue } from "@/components/PendingActionsQueue";
+import { ApprovalHistory, type ApprovalHistoryEntry } from "@/components/ApprovalHistory";
+import { ApprovalSettings, type ApprovalSettings as ApprovalSettingsType, defaultSettings } from "@/components/ApprovalSettings";
+import { MultiAgentOrchestrator } from "@/components/agents/MultiAgentOrchestrator";
+import { ThreeLayerArchitecture } from "@/components/agents/ThreeLayerArchitecture";
+import { SocialReputationDashboard } from "@/components/agents/SocialReputationDashboard";
+import { CrossChainDataSources } from "@/components/agents/CrossChainDataSources";
+import { toast } from "sonner";
 
 export default function AgentDashboardPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -53,6 +65,13 @@ export default function AgentDashboardPage() {
       content: "👋 Welcome to the AI Agent Dashboard!\n\nI can help you interact with **9 specialized AI agents**:\n\n**Core Agents:**\n🔍 **Misinformation Detection** - Analyze claims for false information\n✅ **Truth Verification** - Verify claims with blockchain proofs\n⚡ **Autonomous Transaction** - Make reputation-based decisions\n🌐 **Cross-Chain Reasoning** - Reason across multiple chains\n\n**Social Credit Marketplace Agents:**\n🔎 **Trust Navigator** - Find influencers matching campaigns\n🛡️ **Sybil Detective** - Detect fake accounts and clusters\n🤝 **Contract Negotiator** - Negotiate endorsement deals\n📈 **Campaign Optimizer** - Optimize campaign performance\n✅ **Trust Auditor** - Verify reputation and generate reports\n\nWhat would you like to do?",
     },
   ]);
+
+  // Human-in-the-loop state
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalHistoryEntry[]>([]);
+  const [selectedAction, setSelectedAction] = useState<PendingAction | null>(null);
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [approvalSettings, setApprovalSettings] = useState<ApprovalSettingsType>(defaultSettings);
 
   const [claim, setClaim] = useState("");
   const [truthClaim, setTruthClaim] = useState("");
@@ -103,6 +122,150 @@ export default function AgentDashboardPage() {
     { did: "did:example:1", includeHistory: false },
     { enabled: false }
   );
+
+  // Helper function to check if action requires approval
+  const requiresApproval = (
+    actionType: AgentActionType,
+    confidence: number,
+    riskLevel: "low" | "medium" | "high",
+    amount?: number,
+    isFirstInteraction?: boolean,
+    isCrossChain?: boolean
+  ): boolean => {
+    const settings = approvalSettings;
+    
+    // Check action type requirement
+    if (!settings.requireApprovalFor[actionType]) {
+      return false;
+    }
+    
+    // Check confidence threshold
+    if (confidence < settings.confidenceThreshold) {
+      return true;
+    }
+    
+    // Check risk level threshold
+    const riskLevels = ["low", "medium", "high"];
+    const currentRiskIndex = riskLevels.indexOf(riskLevel);
+    const thresholdIndex = riskLevels.indexOf(settings.riskLevelThreshold);
+    if (currentRiskIndex >= thresholdIndex) {
+      return true;
+    }
+    
+    // Check amount threshold
+    if (amount !== undefined && amount > settings.amountThreshold) {
+      return true;
+    }
+    
+    // Check first interaction
+    if (isFirstInteraction && settings.requireApprovalForFirstInteraction) {
+      return true;
+    }
+    
+    // Check cross-chain
+    if (isCrossChain && settings.requireApprovalForCrossChain) {
+      return true;
+    }
+    
+    return false;
+  };
+
+  // Helper function to create pending action
+  const createPendingAction = (
+    type: AgentActionType,
+    agentName: string,
+    title: string,
+    description: string,
+    details: Record<string, any>,
+    reasoning: string,
+    confidence: number,
+    riskLevel: "low" | "medium" | "high",
+    estimatedImpact?: number
+  ): PendingAction => {
+    return {
+      id: `action-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      agentName,
+      title,
+      description,
+      details,
+      reasoning,
+      confidence,
+      riskLevel,
+      timestamp: Date.now(),
+      estimatedImpact,
+      affectedAccounts: details.targetAccount ? [details.targetAccount] : undefined,
+      amount: details.amount,
+      chain: details.chain,
+    };
+  };
+
+  const handleApproveAction = (actionId: string, notes?: string) => {
+    const action = pendingActions.find((a) => a.id === actionId);
+    if (!action) return;
+
+    // Remove from pending
+    setPendingActions((prev) => prev.filter((a) => a.id !== actionId));
+
+    // Add to history
+    const historyEntry: ApprovalHistoryEntry = {
+      id: `history-${Date.now()}`,
+      actionId: action.id,
+      type: action.type,
+      agentName: action.agentName,
+      title: action.title,
+      decision: "approved",
+      timestamp: action.timestamp,
+      decisionTime: Date.now() - action.timestamp,
+      confidence: action.confidence,
+      riskLevel: action.riskLevel,
+      notes,
+    };
+    setApprovalHistory((prev) => [historyEntry, ...prev]);
+
+    // Close dialog
+    setApprovalDialogOpen(false);
+    setSelectedAction(null);
+
+    toast.success("Action approved", {
+      description: `${action.title} has been approved and will be executed.`,
+    });
+
+    // In a real implementation, you would call the backend to execute the action
+    // await trpc.agents.executeApprovedAction.mutate({ actionId, notes });
+  };
+
+  const handleRejectAction = (actionId: string, reason?: string) => {
+    const action = pendingActions.find((a) => a.id === actionId);
+    if (!action) return;
+
+    // Remove from pending
+    setPendingActions((prev) => prev.filter((a) => a.id !== actionId));
+
+    // Add to history
+    const historyEntry: ApprovalHistoryEntry = {
+      id: `history-${Date.now()}`,
+      actionId: action.id,
+      type: action.type,
+      agentName: action.agentName,
+      title: action.title,
+      decision: "rejected",
+      timestamp: action.timestamp,
+      decisionTime: Date.now() - action.timestamp,
+      confidence: action.confidence,
+      riskLevel: action.riskLevel,
+      reason,
+    };
+    setApprovalHistory((prev) => [historyEntry, ...prev]);
+
+    // Close dialog
+    setApprovalDialogOpen(false);
+    setSelectedAction(null);
+
+    toast.error("Action rejected", {
+      description: `${action.title} has been rejected.`,
+    });
+  };
 
   const handleSendMessage = async (content: string) => {
     const userMessage: Message = { role: "user", content };
@@ -162,6 +325,15 @@ export default function AgentDashboardPage() {
       
       if (result.data?.success) {
         const decision = result.data.decision;
+        const needsApproval = requiresApproval(
+          "autonomous_transaction",
+          decision.confidence,
+          decision.riskAssessment.level,
+          undefined,
+          false,
+          decision.crossChainConsiderations?.consensusRequired
+        );
+
         const response = `⚡ **Autonomous Decision:**\n\n` +
           `**Action:** ${decision.action.toUpperCase()}\n` +
           `**Confidence:** ${(decision.confidence * 100).toFixed(1)}%\n` +
@@ -169,8 +341,36 @@ export default function AgentDashboardPage() {
           `**Risk Level:** ${decision.riskAssessment.level.toUpperCase()}\n` +
           `**Estimated Impact:** ${(decision.estimatedImpact * 100).toFixed(1)}%\n\n` +
           `**Reasoning:** ${decision.reasoning}`;
-        
-        setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+
+        if (needsApproval && decision.action === "execute") {
+          // Create pending action
+          const pendingAction = createPendingAction(
+            "autonomous_transaction",
+            "Autonomous Transaction Agent",
+            `Execute ${action}`,
+            `Execute transaction: ${action} to ${targetAccount}`,
+            { targetAccount, action, amount: undefined },
+            decision.reasoning,
+            decision.confidence,
+            decision.riskAssessment.level,
+            decision.estimatedImpact
+          );
+          setPendingActions((prev) => [...prev, pendingAction]);
+
+          // Add message with pending action
+          setMessages((prev) => [...prev, {
+            role: "assistant",
+            content: response + `\n\n⚠️ **This action requires your approval before execution.**`,
+            pendingAction: {
+              id: pendingAction.id,
+              type: pendingAction.type,
+              title: pendingAction.title,
+              requiresApproval: true,
+            },
+          }]);
+        } else {
+          setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+        }
       }
     } else if (lowerContent.includes("cross-chain") || lowerContent.includes("reasoning") || lowerContent.includes("multiple chains")) {
       // Cross-Chain Reasoning
@@ -283,10 +483,14 @@ export default function AgentDashboardPage() {
       </div>
 
       <Tabs defaultValue="chat" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="chat">Conversational Interface</TabsTrigger>
-          <TabsTrigger value="agents">All Agents</TabsTrigger>
-          <TabsTrigger value="demo">Interactive Demos</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-7">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="agents">Agents</TabsTrigger>
+          <TabsTrigger value="orchestrator">Orchestrator</TabsTrigger>
+          <TabsTrigger value="reputation">Social Reputation</TabsTrigger>
+          <TabsTrigger value="architecture">Architecture</TabsTrigger>
+          <TabsTrigger value="cross-chain">Cross-Chain</TabsTrigger>
+          <TabsTrigger value="demo">Demos</TabsTrigger>
         </TabsList>
 
         <TabsContent value="chat" className="space-y-4">
@@ -304,6 +508,16 @@ export default function AgentDashboardPage() {
                   "Query reputation across multiple chains",
                 ]}
                 height="700px"
+                onApproveAction={(actionId) => {
+                  const action = pendingActions.find((a) => a.id === actionId);
+                  if (action) {
+                    setSelectedAction(action);
+                    setApprovalDialogOpen(true);
+                  }
+                }}
+                onRejectAction={(actionId) => {
+                  handleRejectAction(actionId);
+                }}
               />
             </div>
 
@@ -482,6 +696,22 @@ export default function AgentDashboardPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="orchestrator" className="space-y-4">
+          <MultiAgentOrchestrator />
+        </TabsContent>
+
+        <TabsContent value="reputation" className="space-y-4">
+          <SocialReputationDashboard />
+        </TabsContent>
+
+        <TabsContent value="architecture" className="space-y-4">
+          <ThreeLayerArchitecture />
+        </TabsContent>
+
+        <TabsContent value="cross-chain" className="space-y-4">
+          <CrossChainDataSources />
+        </TabsContent>
+
         <TabsContent value="demo" className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <InteractiveDemoCard
@@ -575,7 +805,59 @@ export default function AgentDashboardPage() {
             />
           </div>
         </TabsContent>
+
+        <TabsContent value="pending" className="space-y-4">
+          <PendingActionsQueue
+            actions={pendingActions}
+            onActionClick={(action) => {
+              setSelectedAction(action);
+              setApprovalDialogOpen(true);
+            }}
+            onQuickApprove={(actionId) => {
+              const action = pendingActions.find((a) => a.id === actionId);
+              if (action) {
+                handleApproveAction(actionId);
+              }
+            }}
+            onQuickReject={(actionId) => {
+              handleRejectAction(actionId);
+            }}
+            emptyMessage="No actions pending approval. All agent actions are proceeding automatically."
+          />
+        </TabsContent>
+
+        <TabsContent value="history" className="space-y-4">
+          <ApprovalHistory
+            history={approvalHistory}
+            onFilterChange={(filter) => {
+              // Filter logic can be added here if needed
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent value="settings" className="space-y-4">
+          <ApprovalSettings
+            settings={approvalSettings}
+            onSettingsChange={setApprovalSettings}
+            onSave={() => {
+              // In a real implementation, save to backend/localStorage
+              localStorage.setItem("approvalSettings", JSON.stringify(approvalSettings));
+              toast.success("Settings saved", {
+                description: "Your approval settings have been saved.",
+              });
+            }}
+          />
+        </TabsContent>
       </Tabs>
+
+      {/* Approval Dialog */}
+      <HumanApprovalDialog
+        action={selectedAction}
+        open={approvalDialogOpen}
+        onOpenChange={setApprovalDialogOpen}
+        onApprove={handleApproveAction}
+        onReject={handleRejectAction}
+      />
     </div>
   );
 }

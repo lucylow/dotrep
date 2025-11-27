@@ -50,6 +50,8 @@ import {
   Zap,
   Target,
   Brain,
+  Sparkles,
+  Coins,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { Link } from "wouter";
@@ -68,6 +70,7 @@ const menuGroups = [
     title: "Reputation",
     items: [
       { icon: TrendingUp, label: "Reputation", path: "/reputation" },
+      { icon: Sparkles, label: "Social Reputation", path: "/social-reputation" },
       { icon: Calculator, label: "Reputation Calculator", path: "/reputation-calculator" },
       { icon: Trophy, label: "Leaderboard", path: "/leaderboard" },
       { icon: Users, label: "Multi-Chain Reputation", path: "/multi-chain" },
@@ -88,7 +91,9 @@ const menuGroups = [
     items: [
       { icon: Network, label: "Chain Info", path: "/chain-info" },
       { icon: Globe, label: "XCM Gateway", path: "/xcm-gateway" },
+      { icon: Database, label: "DKG Interaction", path: "/dkg-interaction" },
       { icon: FileText, label: "Governance", path: "/governance" },
+      { icon: Coins, label: "Tokenomics & DAO", path: "/tokenomics" },
       { icon: User, label: "Identity", path: "/identity" },
       { icon: Activity, label: "Telemetry", path: "/telemetry" },
     ],

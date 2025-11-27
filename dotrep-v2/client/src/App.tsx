@@ -37,6 +37,10 @@ const CommunityNotesPage = lazy(() => import("./pages/CommunityNotesPage"));
 const TrustLayerPage = lazy(() => import("./pages/TrustLayerPage"));
 const AgentDashboardPage = lazy(() => import("./pages/AgentDashboardPage"));
 const DKGInteractionPage = lazy(() => import("./pages/DKGInteractionPage"));
+const SocialReputationDashboard = lazy(() => import("./pages/SocialReputationDashboard"));
+const AIAgentsDKGDemoPage = lazy(() => import("./pages/AIAgentsDKGDemoPage"));
+const KnowledgeAssetsPage = lazy(() => import("./pages/KnowledgeAssetsPage"));
+const TokenomicsSimulationPage = lazy(() => import("./pages/TokenomicsSimulationPage"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Helper component to wrap pages with layout (except landing page)
@@ -265,6 +269,34 @@ function Router() {
         <Suspense fallback={<PageLoader />}>
           <PageWrapper>
             <DKGInteractionPage />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/social-reputation">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <SocialReputationDashboard />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/ai-agents-dkg-demo">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <AIAgentsDKGDemoPage />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/knowledge-assets">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <KnowledgeAssetsPage />
+          </PageWrapper>
+        </Suspense>
+      </Route>
+      <Route path="/tokenomics">
+        <Suspense fallback={<PageLoader />}>
+          <PageWrapper>
+            <TokenomicsSimulationPage />
           </PageWrapper>
         </Suspense>
       </Route>

@@ -25,7 +25,7 @@ const SUPPORTED_CHAINS = [
 export default function MultiChainReputationPage() {
   const { connectionResult } = useDotRepWallet();
   const [accountId, setAccountId] = useState(
-    connectionResult?.address || ""
+    connectionResult?.account?.address || ""
   );
   const [selectedChains, setSelectedChains] = useState<string[]>([
     "polkadot",
@@ -81,10 +81,10 @@ export default function MultiChainReputationPage() {
                   placeholder="5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
                   className="font-mono"
                 />
-                {connectionResult?.address && (
+                {connectionResult?.account?.address && (
                   <Button
                     variant="outline"
-                    onClick={() => setAccountId(connectionResult.address)}
+                    onClick={() => setAccountId(connectionResult.account.address)}
                   >
                     Use Connected
                   </Button>

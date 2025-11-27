@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Loader2, Send, User, Sparkles } from "lucide-react";
+import { Loader2, Send, User, Sparkles, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 
@@ -12,6 +13,12 @@ import { Streamdown } from "streamdown";
 export type Message = {
   role: "system" | "user" | "assistant";
   content: string;
+  pendingAction?: {
+    id: string;
+    type: string;
+    title: string;
+    requiresApproval: boolean;
+  };
 };
 
 export type AIChatBoxProps = {
@@ -57,6 +64,16 @@ export type AIChatBoxProps = {
    * Click to send directly
    */
   suggestedPrompts?: string[];
+
+  /**
+   * Callback when user approves a pending action
+   */
+  onApproveAction?: (actionId: string) => void;
+
+  /**
+   * Callback when user rejects a pending action
+   */
+  onRejectAction?: (actionId: string) => void;
 };
 
 /**
@@ -119,6 +136,8 @@ export function AIChatBox({
   height = "600px",
   emptyStateMessage = "Start a conversation with AI",
   suggestedPrompts,
+  onApproveAction,
+  onRejectAction,
 }: AIChatBoxProps) {
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -261,8 +280,41 @@ export function AIChatBox({
                       )}
                     >
                       {message.role === "assistant" ? (
-                        <div className="prose prose-sm dark:prose-invert max-w-none">
-                          <Streamdown>{message.content}</Streamdown>
+                        <div className="space-y-2">
+                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                            <Streamdown>{message.content}</Streamdown>
+                          </div>
+                          {message.pendingAction && message.pendingAction.requiresApproval && (
+                            <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Clock className="w-3 h-3" />
+                                <span>Action requires approval</span>
+                              </div>
+                              <div className="flex gap-2">
+                                {onRejectAction && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => onRejectAction(message.pendingAction!.id)}
+                                    className="flex-1"
+                                  >
+                                    <XCircle className="w-3 h-3 mr-1" />
+                                    Reject
+                                  </Button>
+                                )}
+                                {onApproveAction && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => onApproveAction(message.pendingAction!.id)}
+                                    className="flex-1"
+                                  >
+                                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                                    Approve
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <p className="whitespace-pre-wrap text-sm">

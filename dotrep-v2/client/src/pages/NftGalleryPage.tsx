@@ -38,8 +38,8 @@ export default function NftGalleryPage() {
   const [selectedRarity, setSelectedRarity] = useState<string>("all");
   const { connectionResult } = useDotRepWallet();
   const { data: nfts, isLoading } = trpc.polkadot.nft.getByAccount.useQuery(
-    { accountId: connectionResult?.address || "" },
-    { enabled: !!connectionResult?.address }
+    { accountId: connectionResult?.account?.address || "" },
+    { enabled: !!connectionResult?.account?.address }
   );
 
   const mockNfts: NFT[] = [

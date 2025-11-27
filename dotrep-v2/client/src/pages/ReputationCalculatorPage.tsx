@@ -176,7 +176,7 @@ export default function ReputationCalculatorPage() {
                       <span className="font-semibold">Total Score</span>
                     </div>
                     <div className="text-3xl font-bold text-purple-900">
-                      {calculateMutation.data.totalScore?.toFixed(2) || "N/A"}
+                      {calculateMutation.data.overall?.toFixed(2) || "N/A"}
                     </div>
                   </div>
 
@@ -186,7 +186,13 @@ export default function ReputationCalculatorPage() {
                       <span className="font-semibold">Contributions</span>
                     </div>
                     <div className="text-3xl font-bold text-green-900">
-                      {calculateMutation.data.contributionCount || 0}
+                      {(() => {
+                        try {
+                          return contributionsJson ? (JSON.parse(contributionsJson) as any[]).length : 0;
+                        } catch {
+                          return 0;
+                        }
+                      })()}
                     </div>
                   </div>
 
@@ -196,7 +202,7 @@ export default function ReputationCalculatorPage() {
                       <span className="font-semibold">Time Decay</span>
                     </div>
                     <div className="text-3xl font-bold text-blue-900">
-                      {calculateMutation.data.timeDecayFactor || timeDecayFactor}
+                      {timeDecayFactor}
                     </div>
                   </div>
                 </div>

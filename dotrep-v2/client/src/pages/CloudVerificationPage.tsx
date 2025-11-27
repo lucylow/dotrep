@@ -98,8 +98,11 @@ export default function CloudVerificationPage() {
     }
 
     batchVerifyMutation.mutate({
-      contributionIds,
-      type,
+      verifications: contributionIds.map(id => ({
+        contributionId: id,
+        proof: "", // Empty proof for batch - will be fetched by service
+        type,
+      })),
     });
   };
 
@@ -285,38 +288,41 @@ export default function CloudVerificationPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Status</span>
                       <Badge
-                        variant={
-                          status.status === "verified"
-                            ? "default"
-                            : status.status === "pending"
-                            ? "secondary"
-                            : "destructive"
-                        }
+                        variant={status.verified ? "default" : "destructive"}
                       >
-                        {status.status === "verified" && (
+                        {status.verified && (
                           <CheckCircle2 className="w-3 h-3 mr-1" />
                         )}
-                        {status.status === "pending" && (
-                          <Clock className="w-3 h-3 mr-1" />
-                        )}
-                        {status.status === "failed" && (
+                        {!status.verified && (
                           <XCircle className="w-3 h-3 mr-1" />
                         )}
-                        {status.status}
+                        {status.verified ? "Verified" : "Not Verified"}
                       </Badge>
                     </div>
-                    {status.verifiedAt && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Score</span>
+                      <span className="text-sm font-semibold">{status.score}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Confidence</span>
+                      <span className="text-sm">{(status.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                    {status.timestamp && (
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-muted-foreground">Verified At</span>
                         <span className="text-sm">
-                          {new Date(status.verifiedAt).toLocaleString()}
+                          {new Date(status.timestamp).toLocaleString()}
                         </span>
                       </div>
                     )}
-                    {status.error && (
-                      <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-                        <div className="text-sm font-semibold text-red-800">Error</div>
-                        <div className="text-sm text-red-600">{status.error}</div>
+                    {status.evidence && status.evidence.length > 0 && (
+                      <div>
+                        <span className="text-sm text-muted-foreground">Evidence</span>
+                        <ul className="text-sm mt-1 list-disc list-inside">
+                          {status.evidence.map((e, i) => (
+                            <li key={i}>{e}</li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>

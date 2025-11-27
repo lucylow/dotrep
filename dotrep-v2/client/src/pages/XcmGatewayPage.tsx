@@ -1,4 +1,4 @@
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,10 @@ import {
   Globe,
   Shield,
   Zap,
-  Activity
+  Activity,
+  Database,
+  Link2,
+  Sparkles
 } from "lucide-react";
 import { UnifiedSidebar } from "@/components/layout/UnifiedSidebar";
 import { useState, useEffect } from "react";
@@ -169,7 +172,7 @@ export default function XcmGatewayPage() {
     setIsQuerying(true);
     try {
       await initiateQueryMutation.mutateAsync({
-        signer: connectionResult.address,
+        signer: connectionResult.account.address,
         targetChain: queryChain,
         targetAccount: queryAccount,
       });
@@ -220,10 +223,11 @@ export default function XcmGatewayPage() {
           </div>
 
           <Tabs defaultValue="query" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="query">Query Reputation</TabsTrigger>
               <TabsTrigger value="verify">Verify Cross-Chain</TabsTrigger>
               <TabsTrigger value="chains">Supported Chains</TabsTrigger>
+              <TabsTrigger value="dkg-integration">DKG Integration</TabsTrigger>
               <TabsTrigger value="history">Query History</TabsTrigger>
             </TabsList>
 
@@ -448,6 +452,206 @@ export default function XcmGatewayPage() {
                   </Card>
                 ))}
               </div>
+            </TabsContent>
+
+            <TabsContent value="dkg-integration">
+              <Card className="p-8">
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <Database className="w-6 h-6 text-purple-600" />
+                      <h2 className="text-2xl font-bold text-[#131313]">
+                        OriginTrail DKG Integration
+                      </h2>
+                    </div>
+                    <p className="text-[#4F4F4F]">
+                      Bridge Polkadot cross-chain reputation with OriginTrail Decentralized Knowledge Graph
+                    </p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <Card className="border-2 border-purple-200 bg-purple-50/30">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Database className="w-5 h-5 text-purple-600" />
+                          DKG Bridge
+                        </CardTitle>
+                        <CardDescription>
+                          Publish XCM query results to OriginTrail DKG as verifiable Knowledge Assets
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <div className="p-4 bg-white rounded-lg border">
+                            <p className="text-sm font-semibold mb-2">Bridge XCM → DKG</p>
+                            <p className="text-xs text-muted-foreground mb-4">
+                              Convert XCM reputation queries into DKG Knowledge Assets for verifiable, AI-ready data
+                            </p>
+                            <Button
+                              variant="outline"
+                              className="w-full"
+                              onClick={() => {
+                                toast.info("DKG bridge feature coming soon!");
+                              }}
+                            >
+                              <Link2 className="w-4 h-4 mr-2" />
+                              Bridge to DKG
+                            </Button>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            <p className="font-semibold mb-1">Benefits:</p>
+                            <ul className="list-disc list-inside space-y-1">
+                              <li>Immutable reputation storage</li>
+                              <li>AI-agent queryable via SPARQL</li>
+                              <li>Cross-platform interoperability</li>
+                              <li>Verifiable Knowledge Assets</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-2 border-blue-200 bg-blue-50/30">
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Network className="w-5 h-5 text-blue-600" />
+                          Unified View
+                        </CardTitle>
+                        <CardDescription>
+                          View reputation from both Polkadot XCM and OriginTrail DKG sources
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <div className="p-4 bg-white rounded-lg border">
+                            <p className="text-sm font-semibold mb-2">Combined Reputation</p>
+                            <p className="text-xs text-muted-foreground mb-4">
+                              See your reputation aggregated from cross-chain queries and DKG assets
+                            </p>
+                            <Button
+                              className="w-full bg-gradient-to-r from-[#6C3CF0] to-[#A074FF]"
+                              onClick={() => {
+                                window.location.href = '/social-reputation';
+                              }}
+                            >
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              View Social Reputation Dashboard
+                            </Button>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            <p className="font-semibold mb-1">Features:</p>
+                            <ul className="list-disc list-inside space-y-1">
+                              <li>Multi-chain aggregation</li>
+                              <li>Real-time updates</li>
+                              <li>DKG asset tracking</li>
+                              <li>Visual data flow</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Data Flow Architecture</CardTitle>
+                      <CardDescription>
+                        How XCM and DKG work together for social reputation
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="relative p-6 bg-gradient-to-br from-gray-50 to-white rounded-lg border-2">
+                        <div className="space-y-6">
+                          {/* Step 1: XCM Query */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                                <Network className="w-6 h-6 text-blue-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold mb-1">1. XCM Cross-Chain Query</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Query reputation scores from Polkadot parachains using Cross-Consensus Messaging
+                              </p>
+                            </div>
+                          </div>
+
+                          <ArrowRight className="w-6 h-6 text-[#6C3CF0] ml-6" />
+
+                          {/* Step 2: Aggregation */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
+                                <Sparkles className="w-6 h-6 text-purple-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold mb-1">2. Reputation Aggregation</h4>
+                              <p className="text-sm text-muted-foreground">
+                                DotRep Hub aggregates reputation from multiple chains and sources
+                              </p>
+                            </div>
+                          </div>
+
+                          <ArrowRight className="w-6 h-6 text-[#6C3CF0] ml-6" />
+
+                          {/* Step 3: DKG Publishing */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
+                                <Database className="w-6 h-6 text-purple-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold mb-1">3. DKG Knowledge Asset</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Publish aggregated reputation as verifiable Knowledge Asset to OriginTrail DKG
+                              </p>
+                            </div>
+                          </div>
+
+                          <ArrowRight className="w-6 h-6 text-[#6C3CF0] ml-6" />
+
+                          {/* Step 4: AI & Verification */}
+                          <div className="flex items-center gap-4">
+                            <div className="flex-shrink-0">
+                              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                                <Shield className="w-6 h-6 text-green-600" />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-semibold mb-1">4. Verifiable & AI-Ready</h4>
+                              <p className="text-sm text-muted-foreground">
+                                Reputation data is now verifiable, queryable via SPARQL, and ready for AI agents
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <Database className="w-5 h-5 text-blue-600 mt-0.5" />
+                      <div className="text-sm text-blue-800">
+                        <p className="font-semibold mb-1">About OriginTrail DKG Integration</p>
+                        <p className="mb-2">
+                          The OriginTrail Decentralized Knowledge Graph enables verifiable, AI-ready reputation data.
+                          By bridging Polkadot XCM queries with DKG Knowledge Assets, you get:
+                        </p>
+                        <ul className="list-disc list-inside space-y-1">
+                          <li><strong>Immutable Storage:</strong> Reputation stored as Knowledge Assets on DKG</li>
+                          <li><strong>AI Integration:</strong> Queryable via SPARQL for AI agent consumption</li>
+                          <li><strong>Cross-Platform:</strong> Interoperable with other DKG-powered applications</li>
+                          <li><strong>Verifiable:</strong> Cryptographic proofs for reputation authenticity</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
             </TabsContent>
 
             <TabsContent value="history">

@@ -25,7 +25,18 @@ import {
   Copy,
   Activity,
   FileText,
-  Hash
+  Hash,
+  Users,
+  TrendingUp,
+  Award,
+  Shield,
+  Network,
+  Star,
+  DollarSign,
+  Signature,
+  Link as LinkIcon,
+  Eye,
+  FileCheck
 } from "lucide-react";
 import { UnifiedSidebar } from "@/components/layout/UnifiedSidebar";
 import { toast } from "sonner";
@@ -37,6 +48,18 @@ import {
   type DKGQuery,
   type DKGPublishOperation
 } from "@/data/enhancedMockData";
+import {
+  mockSocialReputationProfiles,
+  mockSocialConnections,
+  mockCampaignParticipations,
+  getSocialReputationProfile,
+  getSocialConnections,
+  getCampaignParticipations,
+  searchSocialProfiles,
+  type SocialReputationProfile,
+  type SocialConnection,
+  type CampaignParticipation
+} from "@/data/socialReputationMockData";
 
 export default function DKGInteractionPage() {
   const [publishDeveloperId, setPublishDeveloperId] = useState("");
@@ -223,11 +246,13 @@ export default function DKGInteractionPage() {
             </p>
           </div>
 
-          <Tabs defaultValue="publish" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
+          <Tabs defaultValue="social-profiles" className="space-y-6">
+            <TabsList className="grid w-full grid-cols-6">
+              <TabsTrigger value="social-profiles">Social Profiles</TabsTrigger>
               <TabsTrigger value="publish">Publish Asset</TabsTrigger>
               <TabsTrigger value="query">Query by UAL</TabsTrigger>
               <TabsTrigger value="search">Search Assets</TabsTrigger>
+              <TabsTrigger value="social-graph">Social Graph</TabsTrigger>
               <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
 
@@ -400,6 +425,59 @@ export default function DKGInteractionPage() {
                         </CardContent>
                       </Card>
                     )}
+
+                    {/* Check if this is a social reputation profile */}
+                    {queryUAL && (() => {
+                      const socialProfile = mockSocialReputationProfiles.find(p => p.ual === queryUAL);
+                      if (socialProfile) {
+                        return (
+                          <Card className="bg-blue-50 border-blue-200 mt-4">
+                            <CardHeader>
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <Users className="w-5 h-5" />
+                                Social Reputation Profile Found
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <div className="space-y-3">
+                                <div>
+                                  <div className="font-semibold mb-2">{socialProfile.displayName}</div>
+                                  <div className="text-sm text-[#4F4F4F]">{socialProfile.username}</div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <div className="text-xs text-[#4F4F4F]">Social Rank</div>
+                                    <div className="font-bold">{(socialProfile.reputationMetrics.socialRank * 100).toFixed(0)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xs text-[#4F4F4F]">Overall Score</div>
+                                    <div className="font-bold">{(socialProfile.reputationMetrics.overallScore * 100).toFixed(0)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xs text-[#4F4F4F]">Followers</div>
+                                    <div className="font-bold">{(socialProfile.socialMetrics.followerCount / 1000).toFixed(0)}K</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-xs text-[#4F4F4F]">Engagement</div>
+                                    <div className="font-bold">{(socialProfile.socialMetrics.engagementRate * 100).toFixed(1)}%</div>
+                                  </div>
+                                </div>
+                                <div className="pt-2 border-t">
+                                  <div className="flex items-center gap-2">
+                                    <Shield className="w-4 h-4 text-[#4F4F4F]" />
+                                    <span className="text-sm">Sybil Risk: </span>
+                                    <Badge variant={socialProfile.sybilResistance.sybilRisk < 0.2 ? "default" : "secondary"}>
+                                      {(socialProfile.sybilResistance.sybilRisk * 100).toFixed(0)}%
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </div>
               </Card>
@@ -500,6 +578,14 @@ export default function DKGInteractionPage() {
               </Card>
             </TabsContent>
 
+            <TabsContent value="social-profiles">
+              <SocialReputationProfilesTab />
+            </TabsContent>
+
+            <TabsContent value="social-graph">
+              <SocialGraphTab />
+            </TabsContent>
+
             <TabsContent value="history">
               <div className="space-y-4">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -577,6 +663,577 @@ export default function DKGInteractionPage() {
         </div>
       </div>
     </UnifiedSidebar>
+  );
+}
+
+function SocialReputationProfilesTab() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SocialReputationProfile[]>([]);
+
+  const handleSearch = () => {
+    if (!searchQuery.trim()) {
+      setSearchResults(mockSocialReputationProfiles);
+      return;
+    }
+    const results = searchSocialProfiles(searchQuery);
+    setSearchResults(results);
+    toast.success(`Found ${results.length} profile(s)`);
+  };
+
+  const profiles = searchResults.length > 0 ? searchResults : mockSocialReputationProfiles;
+  const selected = selectedProfile 
+    ? profiles.find(p => p.did === selectedProfile)
+    : null;
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-6">
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-2xl font-bold text-[#131313] mb-2">
+              Social Reputation Profiles
+            </h2>
+            <p className="text-[#4F4F4F]">
+              Browse and search influencer profiles with social reputation metrics
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search by username, name, specialty, or platform..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              className="flex-1"
+            />
+            <Button onClick={handleSearch}>
+              <Search className="w-4 h-4 mr-2" />
+              Search
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
+          {profiles.map((profile) => (
+            <Card
+              key={profile.did}
+              className={`cursor-pointer transition-all hover:shadow-lg ${
+                selectedProfile === profile.did ? "ring-2 ring-[#6C3CF0]" : ""
+              }`}
+              onClick={() => setSelectedProfile(
+                selectedProfile === profile.did ? null : profile.did
+              )}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start gap-4">
+                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#6C3CF0] to-[#A074FF] flex items-center justify-center text-white text-2xl font-bold">
+                    {profile.displayName.charAt(0)}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <h3 className="font-bold text-lg">{profile.displayName}</h3>
+                        <p className="text-sm text-[#4F4F4F]">{profile.username}</p>
+                      </div>
+                      <Badge variant="outline" className="bg-green-50">
+                        <Star className="w-3 h-3 mr-1 text-yellow-500" />
+                        {(profile.reputationMetrics.overallScore * 100).toFixed(0)}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {profile.platforms.map((platform) => (
+                        <Badge key={platform} variant="outline" className="text-xs">
+                          {platform}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <div className="text-[#4F4F4F]">Followers</div>
+                        <div className="font-bold">{(profile.socialMetrics.followerCount / 1000).toFixed(0)}K</div>
+                      </div>
+                      <div>
+                        <div className="text-[#4F4F4F]">Engagement</div>
+                        <div className="font-bold">{(profile.socialMetrics.engagementRate * 100).toFixed(1)}%</div>
+                      </div>
+                      <div>
+                        <div className="text-[#4F4F4F]">Campaigns</div>
+                        <div className="font-bold">{profile.campaignsParticipated}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        {selected && (
+          <Card className="sticky top-4 h-fit">
+            <CardHeader>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#6C3CF0] to-[#A074FF] flex items-center justify-center text-white text-3xl font-bold">
+                  {selected.displayName.charAt(0)}
+                </div>
+                <div>
+                  <CardTitle>{selected.displayName}</CardTitle>
+                  <CardDescription>{selected.username}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <h4 className="font-semibold mb-2">Reputation Metrics</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm">Overall Score</span>
+                    <span className="font-bold">{(selected.reputationMetrics.overallScore * 100).toFixed(0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Social Rank</span>
+                    <span className="font-bold">{(selected.reputationMetrics.socialRank * 100).toFixed(0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Economic Stake</span>
+                    <span className="font-bold">{(selected.reputationMetrics.economicStake * 100).toFixed(0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Endorsement Quality</span>
+                    <span className="font-bold">{(selected.reputationMetrics.endorsementQuality * 100).toFixed(0)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-2">Social Metrics</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <div className="text-[#4F4F4F]">Followers</div>
+                    <div className="font-bold">{selected.socialMetrics.followerCount.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#4F4F4F]">Following</div>
+                    <div className="font-bold">{selected.socialMetrics.followingCount.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#4F4F4F]">Engagement Rate</div>
+                    <div className="font-bold">{(selected.socialMetrics.engagementRate * 100).toFixed(2)}%</div>
+                  </div>
+                  <div>
+                    <div className="text-[#4F4F4F]">Total Posts</div>
+                    <div className="font-bold">{selected.socialMetrics.totalPosts.toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-2">Sybil Resistance</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm">Sybil Risk</span>
+                    <Badge variant={selected.sybilResistance.sybilRisk < 0.2 ? "default" : "secondary"}>
+                      {(selected.sybilResistance.sybilRisk * 100).toFixed(0)}%
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Connection Diversity</span>
+                    <span className="font-bold">{(selected.sybilResistance.connectionDiversity * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-2">Specialties</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selected.specialties.map((specialty) => (
+                    <Badge key={specialty} variant="outline">
+                      {specialty}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-semibold">Total Earnings</span>
+                  <span className="text-xl font-bold text-green-600">
+                    ${selected.totalEarnings.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <code className="text-xs text-[#4F4F4F] font-mono break-all">
+                  {selected.ual}
+                </code>
+              </div>
+
+              {/* Provenance, Authorship, and Auditability Section */}
+              {(selected.provenance || selected.authorship || selected.auditability) && (
+                <div className="pt-4 border-t space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Shield className="w-5 h-5 text-[#6C3CF0]" />
+                    <h4 className="font-semibold">Provenance & Auditability</h4>
+                  </div>
+
+                  {/* Authorship */}
+                  {selected.authorship && (
+                    <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Signature className="w-4 h-4 text-[#6C3CF0]" />
+                        Clear Authorship
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Creator DID:</span>
+                          <code className="font-mono text-[10px]">
+                            {selected.authorship.creatorDID.substring(0, 20)}...
+                          </code>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Signature:</span>
+                          {selected.authorship.signature.valid ? (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Valid
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Invalid
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Content Hash:</span>
+                          {selected.authorship.contentHash.match ? (
+                            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Verified
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-300">
+                              <XCircle className="w-3 h-3 mr-1" />
+                              Mismatch
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Provenance */}
+                  {selected.provenance && (
+                    <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <FileCheck className="w-4 h-4 text-[#6C3CF0]" />
+                        Provenance
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Algorithm:</span>
+                          <span className="font-mono">
+                            {selected.provenance.computationMethod.algorithm} v{selected.provenance.computationMethod.version}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Input Graph Hash:</span>
+                          <code className="font-mono text-[10px]">
+                            {selected.provenance.inputGraphHash.substring(0, 12)}...
+                          </code>
+                        </div>
+                        {selected.provenance.previousSnapshot && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Previous Snapshot:</span>
+                            <code className="font-mono text-[10px]">
+                              {selected.provenance.previousSnapshot.substring(0, 20)}...
+                            </code>
+                          </div>
+                        )}
+                        {selected.provenance.computationProof && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Computation Proof:</span>
+                            <code className="font-mono text-[10px]">
+                              {selected.provenance.computationProof.substring(0, 12)}...
+                            </code>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Auditability */}
+                  {selected.auditability && (
+                    <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Eye className="w-4 h-4 text-[#6C3CF0]" />
+                          Auditability
+                        </div>
+                        <Badge 
+                          variant={selected.auditability.verificationStatus === 'verified' ? 'default' : 'secondary'}
+                          className={selected.auditability.verificationStatus === 'verified' ? 'bg-green-500' : ''}
+                        >
+                          {selected.auditability.verificationStatus === 'verified' ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Verified
+                            </>
+                          ) : (
+                            <>
+                              <Clock className="w-3 h-3 mr-1" />
+                              {selected.auditability.verificationStatus}
+                            </>
+                          )}
+                        </Badge>
+                      </div>
+                      <div className="space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Verification Score:</span>
+                          <span className="font-bold text-[#6C3CF0]">
+                            {selected.auditability.verificationScore}/100
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Published:</span>
+                          <span>{new Date(selected.auditability.published).toLocaleDateString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Last Verified:</span>
+                          <span>{new Date(selected.auditability.lastVerified).toLocaleDateString()}</span>
+                        </div>
+                        {selected.auditability.onChainAnchor?.present && (
+                          <div className="pt-2 border-t mt-2">
+                            <div className="flex items-center gap-2 mb-1">
+                              <ExternalLink className="w-3 h-3 text-[#6C3CF0]" />
+                              <span className="text-muted-foreground">On-Chain Anchor</span>
+                            </div>
+                            <div className="space-y-1 pl-5">
+                              {selected.auditability.onChainAnchor.blockNumber && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Block:</span>
+                                  <span className="font-mono">
+                                    {selected.auditability.onChainAnchor.blockNumber.toLocaleString()}
+                                  </span>
+                                </div>
+                              )}
+                              {selected.auditability.onChainAnchor.transactionHash && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Tx Hash:</span>
+                                  <code className="font-mono text-[10px]">
+                                    {selected.auditability.onChainAnchor.transactionHash.substring(0, 12)}...
+                                  </code>
+                                </div>
+                              )}
+                              {selected.auditability.onChainAnchor.chain && (
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Chain:</span>
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {selected.auditability.onChainAnchor.chain}
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {selected.auditability.auditTrail && selected.auditability.auditTrail.length > 0 && (
+                          <div className="pt-2 border-t mt-2">
+                            <div className="text-muted-foreground mb-2">Audit Trail:</div>
+                            <div className="space-y-1 max-h-32 overflow-y-auto">
+                              {selected.auditability.auditTrail.slice(-3).map((entry, idx) => (
+                                <div key={idx} className="text-[10px] pl-2 border-l-2 border-[#6C3CF0]/30">
+                                  <div className="font-medium">{entry.action}</div>
+                                  <div className="text-muted-foreground">
+                                    {new Date(entry.timestamp).toLocaleDateString()}
+                                  </div>
+                                  {entry.details && (
+                                    <div className="text-muted-foreground italic mt-0.5">
+                                      {entry.details}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SocialGraphTab() {
+  const [selectedDid, setSelectedDid] = useState<string | null>(null);
+  const connections = selectedDid ? getSocialConnections(selectedDid) : mockSocialConnections;
+  const profile = selectedDid ? getSocialReputationProfile(selectedDid) : null;
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-6">
+        <div>
+          <h2 className="text-2xl font-bold text-[#131313] mb-2">
+            Social Graph Connections
+          </h2>
+          <p className="text-[#4F4F4F]">
+            Visualize social connections and relationships in the reputation network
+          </p>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Select Profile</CardTitle>
+            <CardDescription>Choose a profile to view connections</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {mockSocialReputationProfiles.map((profile) => (
+                <Button
+                  key={profile.did}
+                  variant={selectedDid === profile.did ? "default" : "outline"}
+                  className="w-full justify-start"
+                  onClick={() => setSelectedDid(
+                    selectedDid === profile.did ? null : profile.did
+                  )}
+                >
+                  <Users className="w-4 h-4 mr-2" />
+                  {profile.displayName}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="lg:col-span-2 space-y-4">
+          {profile && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Profile: {profile.displayName}</CardTitle>
+                <CardDescription>{profile.username}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Network className="w-5 h-5 text-[#6C3CF0]" />
+                    <span className="font-semibold">Connections ({connections.length})</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {connections.length > 0 ? (
+            <div className="space-y-3">
+              {connections.map((connection, index) => {
+                const otherDid = connection.fromDid === selectedDid 
+                  ? connection.toDid 
+                  : connection.fromDid;
+                const otherProfile = getSocialReputationProfile(otherDid);
+                
+                return (
+                  <Card key={index}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#6C3CF0] to-[#A074FF] flex items-center justify-center text-white font-bold">
+                            {otherProfile?.displayName.charAt(0) || "?"}
+                          </div>
+                          <div>
+                            <div className="font-semibold">
+                              {otherProfile?.displayName || otherDid.slice(0, 20)}
+                            </div>
+                            <div className="text-sm text-[#4F4F4F]">
+                              {connection.connectionType.replace(/([A-Z])/g, ' $1').trim()}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <Badge variant="outline">
+                            {(connection.strength * 100).toFixed(0)}% strength
+                          </Badge>
+                          {connection.platform && (
+                            <div className="text-xs text-[#4F4F4F] mt-1">
+                              {connection.platform}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="p-8 text-center text-[#4F4F4F]">
+                {selectedDid 
+                  ? "No connections found for this profile"
+                  : "Select a profile to view connections"}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Campaign Participation</CardTitle>
+          <CardDescription>View campaign history for selected profile</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {selectedDid ? (
+            <div className="space-y-3">
+              {getCampaignParticipations(selectedDid).map((campaign) => (
+                <div key={campaign.campaignId} className="p-4 border rounded-lg">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <div className="font-semibold">{campaign.campaignName}</div>
+                      <div className="text-sm text-[#4F4F4F]">
+                        {new Date(campaign.appliedAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <Badge 
+                      variant={
+                        campaign.status === 'completed' ? 'default' :
+                        campaign.status === 'active' ? 'secondary' :
+                        'outline'
+                      }
+                    >
+                      {campaign.status}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
+                    <div>
+                      <div className="text-[#4F4F4F]">Engagement</div>
+                      <div className="font-bold">{campaign.performance.engagement.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-[#4F4F4F]">Earnings</div>
+                      <div className="font-bold text-green-600">${campaign.earnings.total}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-[#4F4F4F] py-8">
+              Select a profile to view campaign participation
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

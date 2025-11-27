@@ -22,6 +22,7 @@ export default function CloudStoragePage() {
   const [storeMode, setStoreMode] = useState(true);
   const [proofData, setProofData] = useState("");
   const [ipfsHash, setIpfsHash] = useState("");
+  const [contributionId, setContributionId] = useState("");
 
   const storeProofMutation = trpc.cloud.storage.storeProof.useMutation({
     onSuccess: (data) => {
@@ -44,6 +45,10 @@ export default function CloudStoragePage() {
       toast.error("Please enter proof data");
       return;
     }
+    if (!contributionId) {
+      toast.error("Please enter a contribution ID");
+      return;
+    }
 
     let parsedData;
     try {
@@ -54,6 +59,7 @@ export default function CloudStoragePage() {
     }
 
     storeProofMutation.mutate({
+      contributionId,
       proof: parsedData,
       metadata: {},
     });
@@ -102,12 +108,22 @@ export default function CloudStoragePage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
+                  <Label htmlFor="contributionId">Contribution ID</Label>
+                  <Input
+                    id="contributionId"
+                    value={contributionId}
+                    onChange={(e) => setContributionId(e.target.value)}
+                    placeholder="contribution-123"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
                   <Label htmlFor="proofData">Proof Data (JSON)</Label>
                   <Textarea
                     id="proofData"
                     value={proofData}
                     onChange={(e) => setProofData(e.target.value)}
-                    placeholder='{"contributionId": "abc123", "proof": "...", "timestamp": 1234567890}'
+                    placeholder='{"proof": "...", "timestamp": 1234567890}'
                     className="mt-1 font-mono"
                     rows={10}
                   />
@@ -115,7 +131,7 @@ export default function CloudStoragePage() {
 
                 <Button
                   onClick={handleStore}
-                  disabled={storeProofMutation.isPending || !proofData}
+                  disabled={storeProofMutation.isPending || !proofData || !contributionId}
                   className="w-full"
                 >
                   {storeProofMutation.isPending ? (

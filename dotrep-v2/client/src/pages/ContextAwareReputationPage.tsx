@@ -27,7 +27,7 @@ const DAPP_TYPES = [
 export default function ContextAwareReputationPage() {
   const { connectionResult } = useDotRepWallet();
   const [accountId, setAccountId] = useState(
-    connectionResult?.address || ""
+    connectionResult?.account?.address || ""
   );
   const [dappType, setDappType] = useState<"defi" | "governance" | "nft" | "general">("general");
   const [highlightSkills, setHighlightSkills] = useState<string[]>([]);
@@ -74,12 +74,12 @@ export default function ContextAwareReputationPage() {
                   placeholder="5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY"
                   className="font-mono mt-1"
                 />
-                {connectionResult?.address && (
+                {connectionResult?.account?.address && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="mt-2"
-                    onClick={() => setAccountId(connectionResult.address)}
+                    onClick={() => setAccountId(connectionResult.account.address)}
                   >
                     Use Connected
                   </Button>

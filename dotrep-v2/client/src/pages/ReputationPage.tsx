@@ -67,9 +67,9 @@ export default function ReputationPage() {
                     placeholder={connectionResult?.address || "Enter account ID or connect wallet"}
                     className="mt-1 font-mono"
                   />
-                  {connectionResult?.address && (
+                  {connectionResult?.account?.address && (
                     <p className="text-sm text-muted-foreground mt-1">
-                      Connected: {connectionResult.address.slice(0, 20)}...
+                      Connected: {connectionResult.account.address.slice(0, 20)}...
                     </p>
                   )}
                 </div>

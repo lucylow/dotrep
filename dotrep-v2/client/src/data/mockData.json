@@ -1,0 +1,375 @@
+{
+  "aiAgents": {
+    "description": "Mock data for AI agents with OriginTrail DKG and NeuroWeb integration",
+    "agents": [
+      {
+        "agentId": "agent-dkg-navigator-001",
+        "agentName": "DKG Navigator Agent",
+        "agentType": "navigator",
+        "status": "active",
+        "dkgEnabled": true,
+        "neuroWebConnected": true,
+        "totalOperations": 1247,
+        "successRate": 0.96
+      },
+      {
+        "agentId": "agent-dkg-publisher-001",
+        "agentName": "DKG Publisher Agent",
+        "agentType": "publisher",
+        "status": "active",
+        "dkgEnabled": true,
+        "neuroWebConnected": true,
+        "totalOperations": 892,
+        "successRate": 0.94
+      },
+      {
+        "agentId": "agent-fact-checker-001",
+        "agentName": "Fact Checker Agent",
+        "agentType": "verifier",
+        "status": "active",
+        "dkgEnabled": true,
+        "neuroWebConnected": true,
+        "totalOperations": 1534,
+        "successRate": 0.97
+      }
+    ],
+    "knowledgeAssets": [
+      {
+        "ual": "did:dkg:otp:20430:0x1234567890abcdef1234567890abcdef12345678",
+        "assetType": "reputation",
+        "title": "TechGuru Alex - Reputation Profile",
+        "developerId": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+        "reputationScore": 0.89,
+        "neuroWebAnchor": {
+          "blockNumber": 12567890,
+          "transactionHash": "0xabc123def4567890123456789012345678901234567890123456789012345678",
+          "paraId": 20430,
+          "chainId": 20430
+        },
+        "verificationStatus": "verified"
+      }
+    ]
+  },
+  "crossChain": {
+    "description": "Mock data for cross-chain reputation, payments, and data sources across Polkadot parachains",
+    "dataSources": [
+      {
+        "sourceId": "polkadot-relay",
+        "chainName": "Polkadot",
+        "chainType": "relay",
+        "network": "polkadot",
+        "nativeToken": "DOT",
+        "reputationEnabled": true,
+        "dkgEnabled": false,
+        "xcmEnabled": true
+      },
+      {
+        "sourceId": "neuroweb-parachain",
+        "chainName": "NeuroWeb (OriginTrail)",
+        "chainType": "parachain",
+        "paraId": 2043,
+        "chainId": 2043,
+        "network": "polkadot",
+        "nativeToken": "NEURO",
+        "reputationEnabled": true,
+        "dkgEnabled": true,
+        "xcmEnabled": true
+      },
+      {
+        "sourceId": "moonbeam-parachain",
+        "chainName": "Moonbeam",
+        "chainType": "parachain",
+        "paraId": 2004,
+        "chainId": 1284,
+        "network": "polkadot",
+        "nativeToken": "GLMR",
+        "reputationEnabled": true,
+        "dkgEnabled": false,
+        "xcmEnabled": true
+      }
+    ],
+    "xcmTransactions": [
+      {
+        "xcmId": "xcm-001",
+        "sourceChain": "polkadot",
+        "destinationChain": "neuroweb",
+        "messageType": "reputation_query",
+        "status": "completed",
+        "payload": {
+          "userId": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+          "queryType": "reputation_score"
+        },
+        "fees": {
+          "totalFee": 0.015,
+          "feeCurrency": "DOT"
+        },
+        "verification": {
+          "verified": true,
+          "verificationMethod": "xcm_proof"
+        }
+      }
+    ],
+    "crossChainReputation": [
+      {
+        "userId": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+        "primaryChain": "polkadot",
+        "aggregatedScore": 0.875,
+        "consistencyScore": 0.95,
+        "verificationStatus": "verified",
+        "crossChainScores": [
+          {
+            "chain": "polkadot",
+            "reputationScore": 0.89,
+            "verified": true,
+            "source": "on_chain"
+          },
+          {
+            "chain": "neuroweb",
+            "reputationScore": 0.87,
+            "verified": true,
+            "source": "dkg",
+            "ual": "did:dkg:otp:20430:0x1234567890abcdef1234567890abcdef12345678"
+          }
+        ]
+      }
+    ]
+  },
+  "misinformationDetection": {
+    "description": "Mock data for detecting and verifying misinformation with AI agent reasoning",
+    "claims": [
+      {
+        "claimId": "claim-001",
+        "claimText": "Polkadot has processed over 1 billion transactions in 2024",
+        "claimType": "statistical",
+        "verificationStatus": "verifying",
+        "credibilityScore": 0.65,
+        "riskLevel": "medium"
+      },
+      {
+        "claimId": "claim-002",
+        "claimText": "OriginTrail DKG can store unlimited knowledge assets without cost",
+        "claimType": "factual",
+        "verificationStatus": "verified_false",
+        "credibilityScore": 0.25,
+        "riskLevel": "high"
+      }
+    ],
+    "factCheckResults": [
+      {
+        "factCheckId": "factcheck-001",
+        "claimId": "claim-002",
+        "verdict": "false",
+        "confidence": 0.92,
+        "factChecker": "agent-fact-checker-001",
+        "sources": [
+          {
+            "sourceId": "source-001",
+            "sourceName": "OriginTrail DKG Documentation",
+            "sourceType": "official_document",
+            "credibility": 0.95
+          }
+        ],
+        "reasoning": "The claim is false. OriginTrail DKG requires TRAC tokens for anchoring knowledge assets on-chain.",
+        "crossChainVerification": {
+          "verified": true,
+          "chains": ["neuroweb", "polkadot"],
+          "verificationMethod": "dkg_query"
+        }
+      }
+    ],
+    "detectionWorkflows": [
+      {
+        "workflowId": "workflow-misinfo-001",
+        "claimId": "claim-002",
+        "status": "completed",
+        "agents": ["agent-dkg-navigator-001", "agent-dkg-verifier-001", "agent-fact-checker-001"],
+        "finalVerdict": "false",
+        "confidence": 0.92,
+        "dkgQueries": ["did:dkg:otp:20430:0xpricing1234567890abcdef1234567890abcdef12345678"]
+      }
+    ]
+  },
+  "onChainKnowledgeAssets": {
+    "description": "Mock data for verifiable on-chain knowledge assets anchored on Polkadot parachains",
+    "assets": [
+      {
+        "ual": "did:dkg:otp:2043:0xneurowebreputation1234567890abcdef1234567890abcdef12345678",
+        "assetType": "reputation",
+        "parachain": "neuroweb",
+        "paraId": 2043,
+        "chainId": 2043,
+        "anchor": {
+          "blockNumber": 12567890,
+          "transactionHash": "0xneurowebreputation1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+          "status": "finalized",
+          "confirmations": 100
+        },
+        "content": {
+          "contentHash": "0xcontent1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+          "format": "json-ld",
+          "schema": "https://schema.org/Person"
+        },
+        "verification": {
+          "verified": true,
+          "verificationMethod": "on_chain",
+          "verifiedBy": ["agent-dkg-verifier-001"]
+        },
+        "reputationData": {
+          "userId": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+          "reputationScore": 0.89
+        },
+        "dkgIntegration": {
+          "dkgUal": "did:dkg:otp:20430:0x1234567890abcdef1234567890abcdef12345678",
+          "dkgPublished": true
+        }
+      }
+    ],
+    "parachainRegistries": [
+      {
+        "parachain": "neuroweb",
+        "paraId": 2043,
+        "totalAssets": 1250,
+        "verifiedAssets": 1180,
+        "assetsByType": {
+          "reputation": 450,
+          "identity": 320,
+          "contribution": 280
+        }
+      }
+    ]
+  },
+  "autonomousAgents": {
+    "description": "Mock data for autonomous AI agents transacting with reasoning workflows",
+    "agents": [
+      {
+        "agentId": "agent-payment-001",
+        "agentName": "Autonomous Payment Agent",
+        "agentType": "payment",
+        "status": "active",
+        "budget": {
+          "dailyLimit": 100.0,
+          "monthlyLimit": 3000.0,
+          "currency": "USDC"
+        },
+        "reputation": {
+          "agentReputation": 0.92,
+          "transactionCount": 1250,
+          "successRate": 0.96
+        }
+      }
+    ],
+    "transactions": [
+      {
+        "transactionId": "tx-autonomous-001",
+        "agentId": "agent-payment-001",
+        "transactionType": "data_purchase",
+        "status": "completed",
+        "details": {
+          "amount": 25.0,
+          "currency": "USDC",
+          "chain": "base",
+          "service": "Premium Reputation API"
+        },
+        "reasoning": {
+          "decision": "approve",
+          "confidence": 0.89,
+          "reasoningText": "Approved: High-value data purchase with good cost-benefit ratio",
+          "factors": {
+            "costBenefit": 0.85,
+            "budgetAvailable": true,
+            "recipientReputation": 0.76
+          }
+        },
+        "execution": {
+          "txHash": "0xautonomoustx0011234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+          "status": "confirmed"
+        }
+      }
+    ],
+    "workflows": [
+      {
+        "workflowId": "workflow-autonomous-001",
+        "workflowName": "Premium Data Acquisition Workflow",
+        "workflowType": "data_acquisition",
+        "status": "completed",
+        "primaryAgent": "agent-payment-001",
+        "decision": {
+          "finalDecision": "proceed",
+          "confidence": 0.89,
+          "totalCost": 25.0,
+          "expectedBenefit": 0.8
+        }
+      }
+    ],
+    "agentToAgentCommerce": [
+      {
+        "commerceId": "commerce-001",
+        "buyerAgent": "agent-payment-001",
+        "sellerAgent": "agent-commerce-001",
+        "service": {
+          "serviceName": "Premium Reputation Data API",
+          "price": 25.0,
+          "currency": "USDC"
+        },
+        "transaction": {
+          "status": "completed",
+          "amount": 25.0
+        }
+      }
+    ]
+  },
+  "socialReputation": {
+    "description": "Mock data for social reputation with DKG integration",
+    "profiles": [
+      {
+        "did": "did:example:techguru_alex",
+        "ual": "did:dkg:otp:20430:0x1234567890abcdef1234567890abcdef12345678",
+        "username": "@techguru_alex",
+        "displayName": "Tech Guru Alex",
+        "reputationMetrics": {
+          "overallScore": 0.89,
+          "socialRank": 0.92,
+          "economicStake": 0.85
+        },
+        "socialMetrics": {
+          "followerCount": 125000,
+          "engagementRate": 0.045
+        },
+        "sybilResistance": {
+          "sybilRisk": 0.12
+        }
+      }
+    ]
+  },
+  "statistics": {
+    "aiAgents": {
+      "totalAgents": 5,
+      "activeAgents": 5,
+      "averageSuccessRate": 0.95
+    },
+    "crossChain": {
+      "totalDataSources": 5,
+      "parachains": 3,
+      "totalXCMTransactions": 4,
+      "completedXCMTransactions": 3
+    },
+    "misinformation": {
+      "totalClaims": 5,
+      "verifiedFalse": 2,
+      "highRiskClaims": 2,
+      "averageConfidence": 0.90
+    },
+    "onChainAssets": {
+      "totalAssets": 4,
+      "verifiedAssets": 4,
+      "totalRegistries": 3
+    },
+    "autonomousAgents": {
+      "totalAgents": 3,
+      "totalTransactions": 3,
+      "approvedTransactions": 2,
+      "averageConfidence": 0.87
+    }
+  }
+}
+
