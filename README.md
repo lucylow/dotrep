@@ -22,7 +22,6 @@
 - [SPARQL Examples & Discovery](#sparql-examples--discovery)
 - [MCP Tools & Example Agent Prompts](#mcp-tools--example-agent-prompts)
 - [x402 Payment Flow & Receipts (Verifiable)](#x402-payment-flow--receipts-verifiable)
-- [Demo Script (≤5 minutes) — Exact Steps](#demo-script-5-minutes--exact-steps)
 - [Testing & Measurable Metrics](#testing--measurable-metrics)
 - [CI / Reproducibility & MANUS_BUILD_LOG.md](#ci--reproducibility--manus_build_logmd)
 - [Security, Privacy & Ethics](#security-privacy--ethics)
@@ -494,50 +493,6 @@ X-Payment-Proof: {"tx":"0xabc...","signed_by":"did:key:client1"}
 Receipt is signed and published — third parties can verify payer DID, tx hash and resource UAL. This creates auditable access evidence.
 
 **Demo note**: We provide a simulated x402 gateway by default; you may swap in a real testnet micropayment handler for advanced demos.
-
----
-
-## Demo Script (≤5 minutes) — Exact Steps (Copy-Paste)
-
-**Goal**: Show ingestion → DKG asset → reputation computation → agent-cited answer → x402 payment → receipt verification.
-
-### Timeline
-
-- **00:00–00:30** — Slide: Problem statement (misinformation + Sybil attacks). One-sentence DOTREP solution.
-- **00:30–01:00** — Terminal: run SPARQL to fetch a Creator Knowledge Asset:
-
-```bash
-curl -s 'http://localhost:8085/assets/urn:ual:creator:example:creator123' | jq
-```
-
-Open asset showing `contentHash` and `signature`. Run verification:
-
-```bash
-python scripts/verify_asset.py --ual urn:ual:creator:example:creator123
-# should print: HASH OK / SIGNATURE OK
-```
-
-- **01:00–01:40** — Run reputation compute:
-
-```bash
-python services/reputation/compute_reputation.py --input data/sample_graph.json --alpha 0.25 --publish --edge-url http://mock-dkg:8080
-```
-
-Show UI leaderboard updating; highlight Sybil cluster (toggle filter).
-
-- **01:40–02:30** — Agent demo: in UI type: "Is claim X by creator123 true?" Agent calls `get_reputation` + `dkg_retrieve` and responds with a UAL-backed answer. Show UAL citation.
-
-- **02:30–03:20** — x402 demo: Click "Access trusted feed" → show 402 header (network tab) → simulate payment → content returned → ReceiptAsset published (show UAL) → verify receipt:
-
-```bash
-python scripts/verify_asset.py --ual urn:ual:dotrep:receipt:0xabc...
-```
-
-- **03:20–03:50** — Metrics panel: show `sybil_detection_precision`, `agent_citation_rate`, `hash_validation_rate`, `x402_receipts_published`.
-
-- **03:50–04:00** — Close: next steps & link to repository + `MANUS_BUILD_LOG.md`.
-
-**Use the pre-recorded screencast if network latency is an issue.**
 
 ---
 

@@ -772,11 +772,12 @@ export class ReputationCalculator {
           
           // Identify x402 protocol payments
           // x402 payments are HTTP-native, stateless, and cryptographically verified
-          // Indicators: USDC currency, chain specified, or explicit x402 flag
-          const isX402Payment = payment.currency === 'USDC' && 
-                               (payment.chain || payment.verified) &&
-                               // Additional check: x402 payments typically have txHash
-                               payment.txHash;
+          // First check explicit flag, then fall back to heuristics
+          const isX402Payment = payment.isX402Payment === true || 
+                               (payment.currency === 'USDC' && 
+                                (payment.chain || payment.verified) &&
+                                // Additional check: x402 payments typically have txHash
+                                payment.txHash);
           
           if (isX402Payment) {
             x402PaymentCount++;
