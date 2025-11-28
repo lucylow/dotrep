@@ -393,6 +393,17 @@ export class PolkadotApiService {
   }
 
   /**
+   * Get the API instance (ensures connection first)
+   */
+  async getApi(): Promise<ApiPromise> {
+    await this.ensureConnected();
+    if (!this.api) {
+      throw new Error('API not connected');
+    }
+    return this.api;
+  }
+
+  /**
    * Check if API is ready
    */
   async ensureConnected(): Promise<void> {

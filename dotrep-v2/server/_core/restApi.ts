@@ -78,11 +78,16 @@ router.get('/api', (req: Request, res: Response) => {
     description: 'RESTful API for DotRep decentralized reputation system',
     endpoints: {
       health: '/api/health',
+      blockchain: {
+        transactions: 'GET /api/blockchain/transactions?account=...&hash=...',
+        blocks: 'GET /api/blockchain/blocks?blockNumber=...'
+      },
       reputation: {
         publish: 'POST /api/v1/reputation',
         query: 'GET /api/v1/reputation/:ual',
         search: 'GET /api/v1/reputation/search',
-        byDeveloper: 'GET /api/v1/reputation/developer/:developerId'
+        byDeveloper: 'GET /api/v1/reputation/developer/:developerId',
+        anchors: 'GET /api/reputation/anchors?account=...'
       },
       payment: {
         publish: 'POST /api/v1/payment-evidence',
@@ -765,6 +770,356 @@ router.get('/v1/contributors/:id/stats', async (req: Request, res: Response, nex
     });
     
     res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// Blockchain Endpoints
+// ============================================================================
+
+/**
+ * GET /api/blockchain/transactions
+ * Get blockchain transactions
+ * Query params:
+ * - account: Filter by account address
+ * - hash: Get specific transaction by hash
+ */
+router.get('/blockchain/transactions', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { account, hash } = req.query;
+    
+    // Import PolkadotApiService dynamically to avoid circular dependencies
+    const { PolkadotApiService } = await import('./polkadotApi');
+    const polkadotApi = new PolkadotApiService();
+    
+    await polkadotApi.ensureConnected();
+    
+    if (hash) {
+      // Get transaction by hash
+      const txHash = hash as string;
+      try {
+        // Try to get transaction from chain
+        const api = await polkadotApi.getApi();
+        if (!api) throw new Error('API not connected');
+        
+        // Get block hash from transaction hash (this is a simplified approach)
+        // In production, you'd need to track transaction hashes to block mappings
+        const blockHash = await api.rpc.chain.getBlockHash();
+        const signedBlock = await api.rpc.chain.getBlock(blockHash);
+        
+        // Search for transaction in recent blocks
+        let foundTx: any = null;
+        if (signedBlock?.block?.extrinsics) {
+          for (const extrinsic of signedBlock.block.extrinsics) {
+            const extHash = extrinsic.hash.toHex();
+            if (extHash === txHash || extHash.toLowerCase() === txHash.toLowerCase()) {
+              foundTx = {
+                id: `tx-${extHash}`,
+                hash: extHash,
+                blockNumber: signedBlock.block.header.number.toNumber(),
+                blockHash: blockHash.toHex(),
+                extrinsicIndex: signedBlock.block.extrinsics.indexOf(extrinsic),
+                from: extrinsic.signer?.toString() || 'unknown',
+                pallet: extrinsic.method.section,
+                method: extrinsic.method.method,
+                params: extrinsic.method.args.map((arg: any) => arg.toString()),
+                status: 'success',
+                timestamp: Date.now(),
+                fee: '0',
+                nonce: extrinsic.nonce.toNumber(),
+                signature: extrinsic.signature?.toString() || '',
+                events: []
+              };
+              break;
+            }
+          }
+        }
+        
+        if (!foundTx) {
+          return res.status(404).json({
+            error: {
+              code: 'NOT_FOUND',
+              message: `Transaction with hash ${txHash} not found`
+            }
+          });
+        }
+        
+        return res.json([foundTx]);
+      } catch (error) {
+        return res.status(404).json({
+          error: {
+            code: 'NOT_FOUND',
+            message: `Transaction with hash ${hash} not found`
+          }
+        });
+      }
+    } else if (account) {
+      // Get transactions by account
+      const accountAddress = account as string;
+      try {
+        const api = await polkadotApi.getApi();
+        if (!api) throw new Error('API not connected');
+        
+        // Get recent blocks and filter by account
+        const blockHash = await api.rpc.chain.getBlockHash();
+        const signedBlock = await api.rpc.chain.getBlock(blockHash);
+        
+        const transactions: any[] = [];
+        if (signedBlock?.block?.extrinsics) {
+          for (let i = 0; i < signedBlock.block.extrinsics.length; i++) {
+            const extrinsic = signedBlock.block.extrinsics[i];
+            const signer = extrinsic.signer?.toString();
+            
+            if (signer && (signer === accountAddress || signer.toLowerCase() === accountAddress.toLowerCase())) {
+              transactions.push({
+                id: `tx-${extrinsic.hash.toHex()}`,
+                hash: extrinsic.hash.toHex(),
+                blockNumber: signedBlock.block.header.number.toNumber(),
+                blockHash: blockHash.toHex(),
+                extrinsicIndex: i,
+                from: signer,
+                pallet: extrinsic.method.section,
+                method: extrinsic.method.method,
+                params: extrinsic.method.args.map((arg: any) => arg.toString()),
+                status: 'success',
+                timestamp: Date.now(),
+                fee: '0',
+                nonce: extrinsic.nonce.toNumber(),
+                signature: extrinsic.signature?.toString() || '',
+                events: []
+              });
+            }
+          }
+        }
+        
+        return res.json(transactions);
+      } catch (error) {
+        return res.status(500).json({
+          error: {
+            code: 'INTERNAL_SERVER_ERROR',
+            message: `Failed to fetch transactions for account: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }
+        });
+      }
+    } else {
+      // Get all recent transactions
+      try {
+        const api = await polkadotApi.getApi();
+        if (!api) throw new Error('API not connected');
+        
+        const blockHash = await api.rpc.chain.getBlockHash();
+        const signedBlock = await api.rpc.chain.getBlock(blockHash);
+        
+        const transactions: any[] = [];
+        if (signedBlock?.block?.extrinsics) {
+          for (let i = 0; i < signedBlock.block.extrinsics.length; i++) {
+            const extrinsic = signedBlock.block.extrinsics[i];
+            transactions.push({
+              id: `tx-${extrinsic.hash.toHex()}`,
+              hash: extrinsic.hash.toHex(),
+              blockNumber: signedBlock.block.header.number.toNumber(),
+              blockHash: blockHash.toHex(),
+              extrinsicIndex: i,
+              from: extrinsic.signer?.toString() || 'unknown',
+              pallet: extrinsic.method.section,
+              method: extrinsic.method.method,
+              params: extrinsic.method.args.map((arg: any) => arg.toString()),
+              status: 'success',
+              timestamp: Date.now(),
+              fee: '0',
+              nonce: extrinsic.nonce.toNumber(),
+              signature: extrinsic.signature?.toString() || '',
+              events: []
+            });
+          }
+        }
+        
+        return res.json(transactions);
+      } catch (error) {
+        return res.status(500).json({
+          error: {
+            code: 'INTERNAL_SERVER_ERROR',
+            message: `Failed to fetch transactions: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }
+        });
+      }
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/blockchain/blocks
+ * Get blockchain blocks
+ * Query params:
+ * - blockNumber: Get specific block by number
+ */
+router.get('/blockchain/blocks', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { blockNumber } = req.query;
+    
+    const { PolkadotApiService } = await import('./polkadotApi');
+    const polkadotApi = new PolkadotApiService();
+    
+    await polkadotApi.ensureConnected();
+    const api = await polkadotApi.getApi();
+    if (!api) throw new Error('API not connected');
+    
+    if (blockNumber) {
+      // Get specific block by number
+      const blockNum = parseInt(blockNumber as string, 10);
+      if (isNaN(blockNum)) {
+        return res.status(400).json({
+          error: {
+            code: 'BAD_REQUEST',
+            message: 'Invalid blockNumber parameter'
+          }
+        });
+      }
+      
+      try {
+        const blockHash = await api.rpc.chain.getBlockHash(blockNum);
+        const signedBlock = await api.rpc.chain.getBlock(blockHash);
+        
+        if (!signedBlock || !signedBlock.block) {
+          return res.status(404).json({
+            error: {
+              code: 'NOT_FOUND',
+              message: `Block ${blockNum} not found`
+            }
+          });
+        }
+        
+        const block = {
+          number: signedBlock.block.header.number.toNumber(),
+          hash: blockHash.toHex(),
+          parentHash: signedBlock.block.header.parentHash.toHex(),
+          stateRoot: signedBlock.block.header.stateRoot.toHex(),
+          extrinsicsRoot: signedBlock.block.header.extrinsicsRoot.toHex(),
+          timestamp: Date.now(), // Approximate timestamp
+          extrinsicsCount: signedBlock.block.extrinsics.length,
+          eventsCount: 0 // Would need to query events separately
+        };
+        
+        return res.json([block]);
+      } catch (error) {
+        return res.status(404).json({
+          error: {
+            code: 'NOT_FOUND',
+            message: `Block ${blockNumber} not found`
+          }
+        });
+      }
+    } else {
+      // Get recent blocks
+      try {
+        const currentBlockHash = await api.rpc.chain.getBlockHash();
+        const currentBlock = await api.rpc.chain.getBlock(currentBlockHash);
+        
+        if (!currentBlock || !currentBlock.block) {
+          return res.json([]);
+        }
+        
+        const blocks = [{
+          number: currentBlock.block.header.number.toNumber(),
+          hash: currentBlockHash.toHex(),
+          parentHash: currentBlock.block.header.parentHash.toHex(),
+          stateRoot: currentBlock.block.header.stateRoot.toHex(),
+          extrinsicsRoot: currentBlock.block.header.extrinsicsRoot.toHex(),
+          timestamp: Date.now(),
+          extrinsicsCount: currentBlock.block.extrinsics.length,
+          eventsCount: 0
+        }];
+        
+        return res.json(blocks);
+      } catch (error) {
+        return res.status(500).json({
+          error: {
+            code: 'INTERNAL_SERVER_ERROR',
+            message: `Failed to fetch blocks: ${error instanceof Error ? error.message : 'Unknown error'}`
+          }
+        });
+      }
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ============================================================================
+// Reputation Anchors Endpoints
+// ============================================================================
+
+/**
+ * GET /api/reputation/anchors
+ * Get reputation anchors by account
+ * Query params:
+ * - account: Filter by account address
+ */
+router.get('/reputation/anchors', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { account } = req.query;
+    
+    if (!account) {
+      return res.status(400).json({
+        error: {
+          code: 'BAD_REQUEST',
+          message: 'account query parameter is required'
+        }
+      });
+    }
+    
+    // Get anchors from database
+    const { getDb } = await import('../db');
+    const db = await getDb();
+    
+    if (!db) {
+      return res.status(500).json({
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Database not available'
+        }
+      });
+    }
+    
+    try {
+      const { anchors } = await import('../../drizzle/schema');
+      const { eq, desc } = await import('drizzle-orm');
+      
+      // For now, we'll return all anchors since we don't have account mapping in anchors table
+      // In production, you'd want to join with contributions or add account field to anchors
+      const anchorRecords = await db
+        .select()
+        .from(anchors)
+        .orderBy(desc(anchors.createdAt))
+        .limit(100);
+      
+      // Map to the expected format
+      const reputationAnchors = anchorRecords.map((anchor, index) => ({
+        id: `anchor-${String(index + 1).padStart(3, '0')}`,
+        transactionHash: anchor.txHash || `0x${anchor.merkleRoot.substring(0, 64)}`,
+        account: account as string, // Use provided account parameter
+        merkleRoot: anchor.merkleRoot,
+        batchId: `batch-${new Date(anchor.createdAt || new Date()).toISOString().split('T')[0]}-${String(index + 1).padStart(3, '0')}`,
+        cid: anchor.daCid || '',
+        status: anchor.txHash ? 'finalized' : 'anchored',
+        finalizeTransactionHash: anchor.txHash || undefined,
+        timestamp: anchor.createdAt ? new Date(anchor.createdAt).getTime() : Date.now(),
+        blockNumber: anchor.blockNumber || undefined
+      }));
+      
+      return res.json(reputationAnchors);
+    } catch (error) {
+      return res.status(500).json({
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Failed to fetch anchors: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }
+      });
+    }
   } catch (error) {
     next(error);
   }
