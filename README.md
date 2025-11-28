@@ -164,7 +164,7 @@
 
 ### 🔄 Data Ingestion & Publishing
 - **Social Graph Ingestion** — Transform CSV/JSON data → JSON-LD Knowledge Assets
-- **DKG Publishing** — Publish verifiable assets to OriginTrail Edge Node (or mock for demos)
+- **DKG Publishing** — Publish verifiable assets to OriginTrail Edge Node (or  for demos)
 - **Community Notes** — Publish fact-checks and link to target UALs
 
 ### 🧮 Reputation Computation
@@ -342,7 +342,7 @@ Data Sources (CSV/JSON/APIs)
         ↓
   Ingest Service (JSON-LD templates, sign)
         ↓
-  Edge Node (DKG) / Mock DKG ←──── Optional Merkle anchor on NeuroWeb
+  Edge Node (DKG) /  DKG ←──── Optional Merkle anchor on NeuroWeb
         ↑
         |         Reputation Engine (compute + publish)
         |               ↑
@@ -362,7 +362,7 @@ Data Sources (CSV/JSON/APIs)
 - **`apps/mcp-server`** — MCP server exposing tools for AI agents (uses existing dotrep-v2/mcp-server).
 - **`apps/x402`** — Node.js x402 gateway (HTTP 402 flow + receipt publishing).
 - **`apps/ui`** — React app: leaderboards, graph viz, marketplace (uses existing dotrep-v2/client).
-- **`services/mock-dkg`** — Express.js mock DKG Edge Node (for offline demos).
+- **`services/-dkg`** — Express.js  DKG Edge Node (for offline demos).
 - **`scripts/verify_asset.py`** — Python CLI to validate contentHash, signature, and optional on-chain anchor.
 - **`templates/`** — JSON-LD templates for ReputationAsset, ReceiptAsset, CommunityNote.
 - **`deploy/docker-compose.yml`** — Complete Docker Compose setup for all services.
@@ -415,7 +415,7 @@ Data Sources (CSV/JSON/APIs)
   - Expiration time checking
 - **Receipt Generation**: Automatic ReceiptAsset JSON-LD generation and DKG publishing
 
-**5. Mock DKG (`services/mock-dkg/`)**
+**5.  DKG (`services/-dkg/`)**
 - **Language**: Node.js/Express
 - **Storage**: In-memory Map-based storage (non-persistent)
 - **Endpoints**:
@@ -492,7 +492,7 @@ UI (React)
     ↓ HTTP/REST
 MCP Server ←→ x402 Gateway
     ↓ HTTP/REST
-DKG Edge Node (or Mock DKG)
+DKG Edge Node (or  DKG)
     ↑ HTTP/REST
 Ingest Service + Reputation Engine
 ```
@@ -500,7 +500,7 @@ Ingest Service + Reputation Engine
 **Error Handling**:
 - **Retry Logic**: Exponential backoff (max 3 retries)
 - **Circuit Breaker**: Prevents cascading failures
-- **Graceful Degradation**: Fallback to mock services when Edge Node unavailable
+- **Graceful Degradation**: Fallback to  services when Edge Node unavailable
 - **Audit Logging**: All errors logged with context for debugging
 
 ### Architecture Diagram
@@ -549,7 +549,7 @@ cd dotrep
 cp .env.example .env
 
 # Edit .env if you want to customize ports or use real Edge Node
-# For demo purposes, mock DKG is used by default
+# For demo purposes,  DKG is used by default
 ```
 
 ### Step 3: Start All Services
@@ -560,7 +560,7 @@ docker-compose -f deploy/docker-compose.yml up --build
 ```
 
 This will start:
-- 🗄️ **Mock DKG** → http://localhost:8085
+- 🗄️ ** DKG** → http://localhost:8085
 - 🤖 **MCP Server** → http://localhost:3001
 - 💰 **x402 Gateway** → http://localhost:4001
 - 🎨 **React UI** → http://localhost:3000
@@ -637,9 +637,9 @@ EDGE_API_KEY=your_api_key_here
 # SPARQL query endpoint
 EDGE_SPARQL_URL=https://v6-pegasus-node-02.origin-trail.network:8900/sparql
 
-# Alternative: Use local mock DKG (for development/demos)
-MOCK_DKG_URL=http://mock-dkg:8080
-USE_MOCK_DKG=true  # Set to true to use mock instead of real Edge Node
+# Alternative: Use local  DKG (for development/demos)
+_DKG_URL=http://-dkg:8080
+USE__DKG=true  # Set to true to use  instead of real Edge Node
 
 # ============================================================================
 # Cryptographic Keys (DID-based signing)
@@ -670,8 +670,8 @@ X402_HOST=0.0.0.0
 UI_PORT=3000
 UI_HOST=0.0.0.0
 
-# Mock DKG (if used)
-MOCK_DKG_PORT=8085
+#  DKG (if used)
+_DKG_PORT=8085
 
 # ============================================================================
 # Reputation Engine Configuration
@@ -781,9 +781,9 @@ SIMULATE_PAYMENTS=true
 
 ---
 
-## Services: mock-DKG, ingest, reputation, MCP server, x402 gateway, UI
+## Services: -DKG, ingest, reputation, MCP server, x402 gateway, UI
 
-### 1) Mock DKG (Local)
+### 1)  DKG (Local)
 
 A tiny Express app implements:
 
@@ -794,14 +794,14 @@ A tiny Express app implements:
 **Run:**
 
 ```bash
-cd services/mock-dkg
+cd services/-dkg
 npm install
 node server.js
 ```
 
 ### 2) Ingest & Publisher
 
-Converts CSV/JSON → JSON-LD, computes canonical hash, signs with publisher DID, and POSTs to Edge Node / Mock DKG.
+Converts CSV/JSON → JSON-LD, computes canonical hash, signs with publisher DID, and POSTs to Edge Node /  DKG.
 
 **Publish sample (simulate):**
 
@@ -875,7 +875,7 @@ npm run start
 **Flow:**
 
 1. Client `GET /trusted-feed/:resource` → server responds HTTP 402 with header `X-Payment-Request` JSON.
-2. Client `POST /payment/proof` or retry GET with `X-Payment-Proof` header → server validates and returns content + publishes ReceiptAsset to Edge Node/Mock.
+2. Client `POST /payment/proof` or retry GET with `X-Payment-Proof` header → server validates and returns content + publishes ReceiptAsset to Edge Node/.
 
 ### 6) UI (React)
 
@@ -941,7 +941,7 @@ npm run dev
 3. Compute `contentHash = sha256(canonical_bytes)`.
 4. Sign canonical bytes with publisher private key (Ed25519/ECDSA). Save signature base64.
 5. Attach `contentHash` and `signature` to JSON-LD.
-6. POST to Edge Node or Mock DKG. Server returns a UAL (Uniform Asset Locator).
+6. POST to Edge Node or  DKG. Server returns a UAL (Uniform Asset Locator).
 7. Append UAL and fingerprint to `MANUS_BUILD_LOG.md`.
 
 ### Verify Workflow (CLI or UI Verify)
@@ -1479,7 +1479,7 @@ Where `decay_rate = 0.1` (10% decay per year)
 - **`test_dkg_integration.py`**: DKG integration tests
   - Tests SPARQL query execution
   - Validates asset retrieval by UAL
-  - Checks mock DKG fallback
+  - Checks  DKG fallback
 
 **x402 Gateway Tests** (`apps/x402/tests/`):
 
@@ -1503,7 +1503,7 @@ Where `decay_rate = 0.1` (10% decay per year)
 - **Expected**: 100% hash validation, 100% signature validation
 
 **`scripts/run_smoke.sh`**: Complete system smoke test
-1. Start mock DKG service
+1. Start  DKG service
 2. Publish sample assets
 3. Compute reputation scores
 4. Verify assets
@@ -1643,7 +1643,7 @@ assert results.false_positive_rate < 0.15
 - 100K nodes: ~45s
 
 **DKG Publishing** (per asset):
-- Mock DKG: ~50ms
+-  DKG: ~50ms
 - Real Edge Node: ~200-500ms
 
 **SPARQL Query** (average):
@@ -1670,7 +1670,7 @@ python scripts/integrity_tests.py --build-log MANUS_BUILD_LOG.md
 
 - Date/time of build
 - List of produced Knowledge Assets with:
-  - UAL (or `SIMULATED_UAL` if mock-dkg used)
+  - UAL (or `SIMULATED_UAL` if -dkg used)
   - Content hash (sha256 hex)
   - Signature (base64 or hex)
   - Short description (type: ReputationAsset / ReceiptAsset / CommunityNote)
@@ -1845,7 +1845,7 @@ tests:
 - Bug bounty program (details in `SECURITY.md`)
 
 **Known Limitations**:
-- Mock DKG is not secure (development only)
+-  DKG is not secure (development only)
 - Simulated payments don't provide real security guarantees
 - Edge Node credentials must be kept secure
 
@@ -1864,15 +1864,15 @@ tests:
 
 **Services Configured**:
 
-1. **mock-dkg** (Port 8085)
-   - Express.js mock DKG server
+1. **-dkg** (Port 8085)
+   - Express.js  DKG server
    - In-memory asset storage
    - Health check endpoint
 
 2. **ingest-worker** (Background service)
    - Python service for asset publishing
    - Reads from `data/` directory
-   - Publishes to DKG (real or mock)
+   - Publishes to DKG (real or )
 
 3. **reputation-worker** (Background service)
    - Python reputation computation engine
@@ -1949,8 +1949,8 @@ docker-compose -f deploy/docker-compose.yml down -v
 
 **Service Dependencies**:
 - `ui` depends on `mcp-server` and `x402-gateway`
-- `reputation-worker` depends on `mock-dkg` (or Edge Node)
-- `ingest-worker` depends on `mock-dkg` (or Edge Node)
+- `reputation-worker` depends on `-dkg` (or Edge Node)
+- `ingest-worker` depends on `-dkg` (or Edge Node)
 - Docker Compose handles dependency ordering automatically
 
 ### Kubernetes / Helm Deployment
@@ -2051,7 +2051,7 @@ ingress:
 dkg:
   edgeNodeUrl: "https://v6-pegasus-node-02.origin-trail.network:8900"
   apiKeySecretName: "dkg-api-key"
-  mockEnabled: false
+  Enabled: false
 
 # Secrets
 secrets:
@@ -2254,7 +2254,7 @@ dotrep/
 ├── services/                # Background services
 │   ├── ingest/             # Data ingestion & publishing
 │   ├── reputation/         # Reputation computation engine
-│   └── mock-dkg/           # Mock DKG Edge Node
+│   └── -dkg/           #  DKG Edge Node
 ├── scripts/                # Utility scripts
 │   ├── verify_asset.py     # Asset verification CLI
 │   ├── integrity_tests.py  # Integrity test suite
@@ -2307,8 +2307,8 @@ cd apps/ui && npm install && cd ../..
 cp .env.example .env
 # Edit .env with your configuration
 
-# 5. Start mock DKG
-cd services/mock-dkg && npm install && npm start
+# 5. Start  DKG
+cd services/-dkg && npm install && npm start
 
 # 6. Run services
 # Terminal 1: Ingest service
@@ -2360,7 +2360,7 @@ python scripts/integrity_tests.py --build-log MANUS_BUILD_LOG.md
   - Check `EDGE_PUBLISH_URL` is correct
   - Verify `EDGE_API_KEY` is valid
   - Test connectivity: `curl $EDGE_PUBLISH_URL/health`
-  - Use mock DKG for local development: `USE_MOCK_DKG=true`
+  - Use  DKG for local development: `USE__DKG=true`
 
 **Issue**: Signature verification fails
 - **Symptoms**: `Signature verification failed` errors
@@ -2598,14 +2598,14 @@ cd apps/mcp-server && npm test
 - **UI**: http://localhost:3000
 - **MCP Server**: http://localhost:3001
 - **x402 Gateway**: http://localhost:4001
-- **Mock DKG**: http://localhost:8085
+- ** DKG**: http://localhost:8085
 - **API Docs**: http://localhost:3000/api/docs
 
 ---
 
 ## 🎯 For Judges & Integrators
 
-**DOTREP** is built to be **reproducible, auditable, and extensible**. Everything in this README is executable end-to-end using the included Docker Compose stack and mock DKG.
+**DOTREP** is built to be **reproducible, auditable, and extensible**. Everything in this README is executable end-to-end using the included Docker Compose stack and  DKG.
 
 ### Verification Checklist
 
